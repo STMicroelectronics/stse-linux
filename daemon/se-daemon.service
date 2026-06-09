@@ -1,0 +1,53 @@
+[Unit]
+Description=STSAFE Secure Element Daemon
+Documentation=https://github.com/STMicroelectronics/stse-linux
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+# Run as root so we can open /dev/i2c-* without needing group membership.
+# For production hardening, consider using 'User=se-daemon' with
+# 'SupplementaryGroups=i2c' and the appropriate AmbientCapabilities.
+User=root
+Group=root
+
+# Expose the socket to members of the 'se-daemon' group (mode 0660).
+# Applications must be in this group to connect.
+# Create the group first:
+#   groupadd --system se-daemon
+#   usermod -aG se-daemon <your_app_user>
+UMask=0117
+
+# Executable and arguments
+# --bus    : I2C bus number (default: 1  → /dev/i2c-1)
+# --socket : Unix socket path (default: /var/run/se-daemon.sock)
+# --debug  : Print every I2C TX/RX frame to stderr (journald) — remove for production
+ExecStart=/usr/local/sbin/se-daemon \
+    --bus 1 \
+    --socket /var/run/se-daemon.sock
+
+# Clean up the socket file on exit
+ExecStopPost=/bin/rm -f /var/run/se-daemon.sock
+
+# Ensure /var/run exists and is writable
+RuntimeDirectory=se-daemon
+RuntimeDirectoryMode=0755
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/run /dev
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=se-daemon
+
+[Install]
+WantedBy=multi-user.target
