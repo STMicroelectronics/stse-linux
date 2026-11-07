@@ -9,17 +9,17 @@
  *         (defaults: busID=1, slotID=0)
  *
  * Prerequisites:
- *   OPENSSL_MODULES=<path/to/build>  — directory containing stse.so
+ *   OPENSSL_MODULES=<path/to/build>  — directory containing stsafe-l010.so
  *   se-daemon running, libstse.so installed
  *
  * How it works (all via standard OpenSSL 3.x EVP APIs):
  *   1. Initialize STSAFE-L010 native handler and read the device certificate.
  *   2. Parse the device certificate using libstse to extract the public key.
- *   3. Load the "stse" provider (stse.so) and the "default" provider.
+ *   3. Load the "stsafe-l010" provider (stsafe-l010.so) and the "default" provider.
  *   4. Import the public key and configure slot/bus using EVP_PKEY_fromdata()
  *      to construct an EVP_PKEY context linked to the hardware slot.
  *   5. Sign test data on hardware via one-shot EVP_DigestSign() with
- *      "provider=stse" context property.
+ *      "provider=stsafe-l010" context property.
  *   6. Verify the signature in software via one-shot EVP_DigestVerify()
  *      using the default provider context.
  *
@@ -129,19 +129,19 @@ int main(int argc, char *argv[])
 
     /* ----------------------------------------------------------------
      * 3. Load OpenSSL providers
-     *    stsafel.so — hardware keygen + sign (STSAFE-L010)
-     *    default  — software verify, RNG
+     *    stsafe-l010.so — hardware keygen + sign (STSAFE-L010)
+     *    default        — software verify, RNG
      * --------------------------------------------------------------- */
-    OSSL_PROVIDER *prov_stse    = OSSL_PROVIDER_load(NULL, "stsafel");
+    OSSL_PROVIDER *prov_stse    = OSSL_PROVIDER_load(NULL, "stsafe-l010");
     OSSL_PROVIDER *prov_default = OSSL_PROVIDER_load(NULL, "default");
 
     if (!prov_stse)
-        ssl_die("OSSL_PROVIDER_load(\"stsafel\") failed — "
-                "set OPENSSL_MODULES to the directory containing stsafel.so");
+        ssl_die("OSSL_PROVIDER_load(\"stsafe-l010\") failed — "
+                "set OPENSSL_MODULES to the directory containing stsafe-l010.so");
     if (!prov_default)
         ssl_die("OSSL_PROVIDER_load(\"default\") failed");
 
-    printf("[3] Providers loaded (stsafel + default)  OK\n");
+    printf("[3] Providers loaded (stsafe-l010 + default)  OK\n");
 
     /* ----------------------------------------------------------------
      * 4. Build EVP_PKEY from parsed public key and configuration
@@ -149,7 +149,7 @@ int main(int argc, char *argv[])
     printf("[4] Building EVP_PKEY from public key (fromdata) ...");
     fflush(stdout);
 
-    EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_from_name(NULL, "ED25519", "provider=stsafel");
+    EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_from_name(NULL, "ED25519", "provider=stsafe-l010");
     if (!pctx)                               ssl_die("EVP_PKEY_CTX_new_from_name");
     if (EVP_PKEY_fromdata_init(pctx) <= 0)   ssl_die("EVP_PKEY_fromdata_init");
 
@@ -187,7 +187,7 @@ int main(int argc, char *argv[])
     if (!sign_ctx) ssl_die("EVP_MD_CTX_new (sign)");
 
     if (EVP_DigestSignInit_ex(sign_ctx, NULL, NULL, NULL,
-                              "provider=stsafel", hw_pkey, NULL) <= 0)
+                              "provider=stsafe-l010", hw_pkey, NULL) <= 0)
         ssl_die("EVP_DigestSignInit_ex");
 
     size_t sig_len = 0;

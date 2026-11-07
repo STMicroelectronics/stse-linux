@@ -11,6 +11,18 @@ Demonstrates full certificate-chain device authentication of the STSAFE-A120.  T
 
 This provides a reference implementation for authenticating an STSAFE-A120 from a Linux host — analogous to what a distant server would perform.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_device_authenticate()"]
+    D --> E{"Authentication OK?"}
+    E -- Yes --> F["Success"]
+    E -- No --> G["Error / Halt"]
+```
+
 ## Architecture
 
 ```
@@ -23,7 +35,7 @@ This provides a reference implementation for authenticating an STSAFE-A120 from 
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 SPL05 provisioned with ST Production CA cert in zone 0 |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

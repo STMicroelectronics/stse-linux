@@ -1,7 +1,7 @@
 /**
  * *****************************************************************************
- * @file    stsafea_provider.c
- * @brief   STSAFE-A120 OpenSSL 3.x Provider
+ * @file    stsafe-a110_provider.c
+ * @brief   STSAFE-A110 OpenSSL 3.x Provider
  * *****************************************************************************
  *           COPYRIGHT 2026 STMicroelectronics
  * *****************************************************************************
@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 
 #include <openssl/core.h>
 #include <openssl/core_dispatch.h>
@@ -22,16 +23,21 @@
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #include <openssl/crypto.h>
+#include <openssl/core_object.h>
+#include <openssl/asn1.h>
+#include <openssl/objects.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
 
 #include "stselib.h"
 #include "stse_provider.h"
 
 /* =========================================================================
- * NOTE: stsafea.so links directly against libstse.so — no dlopen/dlsym.
- * =========================================================================
+ * NOTE: stsafea110.so links directly against libstse.so — no dlopen/dlsym.
+ * ========================================================================= */
 
 /* =========================================================================
- * Curve mapping and parameters
+ * Curve mapping and parameters (STSAFE-A110 supports NIST & Brainpool 256/384)
  * ========================================================================= */
 typedef struct {
     const char *name;
@@ -41,16 +47,13 @@ typedef struct {
 } curve_map_t;
 
 static const curve_map_t ec_curves[] = {
-    { "prime256v1", STSE_ECC_KT_NIST_P_256, 256, 32 },
-    { "P-256", STSE_ECC_KT_NIST_P_256, 256, 32 },
-    { "secp384r1", STSE_ECC_KT_NIST_P_384, 384, 48 },
-    { "P-384", STSE_ECC_KT_NIST_P_384, 384, 48 },
-    { "nistp521", STSE_ECC_KT_NIST_P_521, 521, 66 },
-    { "P-521", STSE_ECC_KT_NIST_P_521, 521, 66 },
-    { "brainpoolP256r1", STSE_ECC_KT_BP_P_256, 256, 32 },
-    { "brainpoolP384r1", STSE_ECC_KT_BP_P_384, 384, 48 },
-    { "brainpoolP512r1", STSE_ECC_KT_BP_P_512, 512, 64 },
-    { NULL, STSE_ECC_KT_INVALID, 0, 0 }
+    { "prime256v1",       STSE_ECC_KT_NIST_P_256, 256, 32 },
+    { "P-256",            STSE_ECC_KT_NIST_P_256, 256, 32 },
+    { "secp384r1",        STSE_ECC_KT_NIST_P_384, 384, 48 },
+    { "P-384",            STSE_ECC_KT_NIST_P_384, 384, 48 },
+    { "brainpoolP256r1",  STSE_ECC_KT_BP_P_256,   256, 32 },
+    { "brainpoolP384r1",  STSE_ECC_KT_BP_P_384,   384, 48 },
+    { NULL,               STSE_ECC_KT_INVALID,    0,   0  }
 };
 
 /* =========================================================================
@@ -59,29 +62,26 @@ static const curve_map_t ec_curves[] = {
 typedef struct stse_provctx_st {
     const OSSL_CORE_HANDLE *handle;
     stse_Handler_t          handler;
-    uint8_t                 active_bus_id;   /* bus used for current handler  */
+    uint8_t                 active_bus_id;   /* bus used for current handler */
     uint8_t                 active_dev_addr; /* I²C device address in use    */
     int                     initialized;
+    OSSL_FUNC_BIO_write_ex_fn *bio_write_ex;
+    OSSL_FUNC_BIO_read_ex_fn  *bio_read_ex;
+    OSSL_FUNC_BIO_puts_fn     *bio_puts;
 } stse_provctx_t;
 
 /* =========================================================================
  * Key data — per EVP_PKEY
  * ========================================================================= */
-typedef enum {
-    STSE_KEY_TYPE_EC,
-    STSE_KEY_TYPE_X25519
-} stse_key_type_t;
-
 typedef struct stse_key_st {
-    stse_provctx_t *provctx;
-    stse_key_type_t key_type;
+    stse_provctx_t     *provctx;
     stse_ecc_key_type_t curve_type;
-    uint8_t         slot;
-    uint8_t         bus_id;
-    uint8_t         dev_addr;
-    uint8_t         pub_point[133]; /* 0x04 || X || Y for EC, or raw 32 bytes for X25519 */
-    size_t          pub_len;
-    int             has_pub;
+    uint8_t             slot;
+    uint8_t             bus_id;
+    uint8_t             dev_addr;
+    uint8_t             pub_point[97]; /* 0x04 || X || Y (max 1 + 2*48 = 97 for P-384) */
+    size_t              pub_len;
+    int                 has_pub;
 } stse_key_t;
 
 /* =========================================================================
@@ -89,7 +89,6 @@ typedef struct stse_key_st {
  * ========================================================================= */
 typedef struct stse_genctx_st {
     stse_provctx_t     *provctx;
-    stse_key_type_t     key_type;
     stse_ecc_key_type_t curve_type;
     uint8_t             slot;
     uint8_t             bus_id;
@@ -103,17 +102,19 @@ typedef struct stse_sigctx_st {
     stse_provctx_t *provctx;
     stse_key_t     *key;    /* borrowed from EVP_PKEY */
     EVP_MD_CTX     *md_ctx; /* for digest streaming API */
+    char            md_name[64];
 } stse_sigctx_t;
 
 /* =========================================================================
  * Forward declarations
  * ========================================================================= */
 static int stse_keymgmt_gen_set_params(void *vgenctx, const OSSL_PARAM params[]);
-static void *stse_keymgmt_new(void *vprovctx);
+static void *stsafea110_ec_keymgmt_new(void *vprovctx);
 static void  stse_keymgmt_free(void *vkey);
+static int stse_sig_set_ctx_params(void *vsigctx, const OSSL_PARAM params[]);
 
 /* =========================================================================
- * libstse.so loading + STSAFE-A initialisation
+ * libstse.so loading + STSAFE-A110 initialisation
  * ========================================================================= */
 
 static int provctx_ensure_init(stse_provctx_t *pctx, uint8_t bus_id,
@@ -125,7 +126,7 @@ static int provctx_ensure_init(stse_provctx_t *pctx, uint8_t bus_id,
 
     stse_ReturnCode_t rc = stse_set_default_handler_value(&pctx->handler);
     if (rc != STSE_OK) {
-        fprintf(stderr, "[stsafea_provider] set_default_handler_value: %d\n", rc);
+        fprintf(stderr, "[stsafea110_provider] set_default_handler_value: %d\n", rc);
         return 0;
     }
 
@@ -136,7 +137,7 @@ static int provctx_ensure_init(stse_provctx_t *pctx, uint8_t bus_id,
 
     rc = stse_init(&pctx->handler);
     if (rc != STSE_OK) {
-        fprintf(stderr, "[stsafea_provider] stse_init (device %d, bus %u, devaddr 0x%02X): %d\n",
+        fprintf(stderr, "[stsafea110_provider] stse_init (device %d, bus %u, devaddr 0x%02X): %d\n",
                 dev_type, bus_id, dev_addr, rc);
         pctx->initialized = 0;
         return 0;
@@ -152,38 +153,17 @@ static int provctx_ensure_init(stse_provctx_t *pctx, uint8_t bus_id,
  * KEYMGMT — key lifecycle
  * ========================================================================= */
 
-static void *stse_keymgmt_new(void *vprovctx)
+static void *stsafea110_ec_keymgmt_new(void *vprovctx)
 {
     stse_key_t *key = OPENSSL_zalloc(sizeof(*key));
     if (!key) return NULL;
     key->provctx    = (stse_provctx_t *)vprovctx;
+    key->curve_type = STSE_ECC_KT_NIST_P_256; /* default */
     key->slot       = 0;
     key->bus_id     = 1;
+    key->pub_len    = 65; /* 0x04 || X || Y (NIST P-256 default) */
+    key->dev_addr   = 0x20; /* default STSAFE-A110 I²C address */
     key->has_pub    = 0;
-    return key;
-}
-
-static void *stsafea_ec_keymgmt_new(void *vprovctx)
-{
-    stse_key_t *key = stse_keymgmt_new(vprovctx);
-    if (key) {
-        key->key_type   = STSE_KEY_TYPE_EC;
-        key->curve_type = STSE_ECC_KT_NIST_P_256; /* default */
-        key->pub_len    = 65; /* 0x04 || X || Y (NIST P-256 default) */
-        key->dev_addr   = 0x20; /* default STSAFE-A120 I²C address */
-    }
-    return key;
-}
-
-static void *stsafea_x25519_keymgmt_new(void *vprovctx)
-{
-    stse_key_t *key = stse_keymgmt_new(vprovctx);
-    if (key) {
-        key->key_type   = STSE_KEY_TYPE_X25519;
-        key->curve_type = STSE_ECC_KT_CURVE25519;
-        key->pub_len    = 32;
-        key->dev_addr   = 0x20; /* default STSAFE-A120 I²C address */
-    }
     return key;
 }
 
@@ -192,7 +172,7 @@ static void stse_keymgmt_free(void *vkey)
     OPENSSL_free(vkey);
 }
 
-static int stsafea_ec_keymgmt_has(const void *vkey, int selection)
+static int stsafea110_ec_keymgmt_has(const void *vkey, int selection)
 {
     const stse_key_t *key = (const stse_key_t *)vkey;
     if (!key) return 0;
@@ -208,22 +188,8 @@ static int stsafea_ec_keymgmt_has(const void *vkey, int selection)
     return ok;
 }
 
-static int stsafea_x25519_keymgmt_has(const void *vkey, int selection)
-{
-    const stse_key_t *key = (const stse_key_t *)vkey;
-    if (!key) return 0;
-
-    int ok = 1;
-    if (selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY)
-        ok = ok && 1;
-    if (selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY)
-        ok = ok && key->has_pub;
-
-    return ok;
-}
-
-static int stsafea_ec_keymgmt_export(void *vkey, int selection,
-                                     OSSL_CALLBACK *cb, void *cbarg)
+static int stsafea110_ec_keymgmt_export(void *vkey, int selection,
+                                        OSSL_CALLBACK *cb, void *cbarg)
 {
     stse_key_t *key = (stse_key_t *)vkey;
     if (!key) return 0;
@@ -257,52 +223,22 @@ static int stsafea_ec_keymgmt_export(void *vkey, int selection,
     return cb(params, cbarg);
 }
 
-static int stsafea_x25519_keymgmt_export(void *vkey, int selection,
-                                         OSSL_CALLBACK *cb, void *cbarg)
-{
-    stse_key_t *key = (stse_key_t *)vkey;
-    if (!key) return 0;
-
-    if (!(selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY))
-        return 1;
-    if (!key->has_pub)
-        return 0;
-
-    OSSL_PARAM params[2];
-    params[0] = OSSL_PARAM_construct_octet_string(
-        OSSL_PKEY_PARAM_PUB_KEY, key->pub_point, key->pub_len);
-    params[1] = OSSL_PARAM_construct_end();
-    return cb(params, cbarg);
-}
-
-static const OSSL_PARAM stsafea_ec_keymgmt_export_types_tab[] = {
+static const OSSL_PARAM stsafea110_ec_keymgmt_export_types_tab[] = {
     OSSL_PARAM_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, NULL, 0),
     OSSL_PARAM_octet_string(OSSL_PKEY_PARAM_PUB_KEY,   NULL, 0),
     OSSL_PARAM_END
 };
 
-static const OSSL_PARAM *stsafea_ec_keymgmt_export_types(int selection)
+static const OSSL_PARAM *stsafea110_ec_keymgmt_export_types(int selection)
 {
     if (selection & (OSSL_KEYMGMT_SELECT_PUBLIC_KEY |
                      OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS))
-        return stsafea_ec_keymgmt_export_types_tab;
+        return stsafea110_ec_keymgmt_export_types_tab;
     return NULL;
 }
 
-static const OSSL_PARAM stsafea_x25519_keymgmt_export_types_tab[] = {
-    OSSL_PARAM_octet_string(OSSL_PKEY_PARAM_PUB_KEY,   NULL, 0),
-    OSSL_PARAM_END
-};
-
-static const OSSL_PARAM *stsafea_x25519_keymgmt_export_types(int selection)
-{
-    if (selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY)
-        return stsafea_x25519_keymgmt_export_types_tab;
-    return NULL;
-}
-
-static int stsafea_ec_keymgmt_import(void *vkey, int selection,
-                                     const OSSL_PARAM params[])
+static int stsafea110_ec_keymgmt_import(void *vkey, int selection,
+                                        const OSSL_PARAM params[])
 {
     stse_key_t *key = (stse_key_t *)vkey;
     if (!key) return 0;
@@ -365,71 +301,19 @@ static int stsafea_ec_keymgmt_import(void *vkey, int selection,
             key->bus_id = (uint8_t)val;
     }
 
-    const OSSL_PARAM *p_da_ec = OSSL_PARAM_locate_const(params, STSE_PROV_PARAM_DEVADDR);
-    if (p_da_ec) {
+    const OSSL_PARAM *p_da = OSSL_PARAM_locate_const(params, STSE_PROV_PARAM_DEVADDR);
+    if (p_da) {
         uint32_t val;
-        if (OSSL_PARAM_get_uint32(p_da_ec, &val))
+        if (OSSL_PARAM_get_uint32(p_da, &val))
             key->dev_addr = (uint8_t)val;
     }
 
     return 1;
 }
 
-static int stsafea_x25519_keymgmt_import(void *vkey, int selection,
-                                         const OSSL_PARAM params[])
+static const OSSL_PARAM *stsafea110_ec_keymgmt_import_types(int selection)
 {
-    stse_key_t *key = (stse_key_t *)vkey;
-    if (!key) return 0;
-
-    if (!(selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY))
-        return 1;
-
-    const OSSL_PARAM *p = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_PUB_KEY);
-    if (!p) return 0;
-
-    const void *pub_data = NULL;
-    size_t      pub_len  = 0;
-    if (!OSSL_PARAM_get_octet_string_ptr(p, &pub_data, &pub_len))
-        return 0;
-
-    if (pub_len != 32) return 0;
-
-    memcpy(key->pub_point, pub_data, 32);
-    key->pub_len = 32;
-    key->has_pub = 1;
-
-    const OSSL_PARAM *p_slot = OSSL_PARAM_locate_const(params, STSE_PROV_PARAM_SLOT);
-    if (p_slot) {
-        uint32_t val;
-        if (OSSL_PARAM_get_uint32(p_slot, &val))
-            key->slot = (uint8_t)val;
-    }
-
-    const OSSL_PARAM *p_bus = OSSL_PARAM_locate_const(params, STSE_PROV_PARAM_BUS);
-    if (p_bus) {
-        uint32_t val;
-        if (OSSL_PARAM_get_uint32(p_bus, &val))
-            key->bus_id = (uint8_t)val;
-    }
-
-    const OSSL_PARAM *p_da_x25 = OSSL_PARAM_locate_const(params, STSE_PROV_PARAM_DEVADDR);
-    if (p_da_x25) {
-        uint32_t val;
-        if (OSSL_PARAM_get_uint32(p_da_x25, &val))
-            key->dev_addr = (uint8_t)val;
-    }
-
-    return 1;
-}
-
-static const OSSL_PARAM *stsafea_ec_keymgmt_import_types(int selection)
-{
-    return stsafea_ec_keymgmt_export_types(selection);
-}
-
-static const OSSL_PARAM *stsafea_x25519_keymgmt_import_types(int selection)
-{
-    return stsafea_x25519_keymgmt_export_types(selection);
+    return stsafea110_ec_keymgmt_export_types(selection);
 }
 
 static const OSSL_PARAM stse_keymgmt_gettable_params_tab[] = {
@@ -445,7 +329,7 @@ static const OSSL_PARAM *stse_keymgmt_gettable_params(void *vprovctx)
     return stse_keymgmt_gettable_params_tab;
 }
 
-static int stsafea_ec_keymgmt_get_params(void *vkey, OSSL_PARAM params[])
+static int stsafea110_ec_keymgmt_get_params(void *vkey, OSSL_PARAM params[])
 {
     stse_key_t *key = (stse_key_t *)vkey;
     OSSL_PARAM *p;
@@ -484,41 +368,23 @@ static int stsafea_ec_keymgmt_get_params(void *vkey, OSSL_PARAM params[])
     return 1;
 }
 
-static int stsafea_x25519_keymgmt_get_params(void *vkey, OSSL_PARAM params[])
-{
-    stse_key_t *key = (stse_key_t *)vkey;
-    OSSL_PARAM *p;
-
-    p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_PUB_KEY);
-    if (p) {
-        if (!key->has_pub) return 0;
-        if (!OSSL_PARAM_set_octet_string(p, key->pub_point, key->pub_len))
-            return 0;
-    }
-
-    p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_BITS);
-    if (p) {
-        int bits = 256;
-        if (!OSSL_PARAM_set_int(p, bits)) return 0;
-    }
-    return 1;
-}
-
 /* =========================================================================
  * KEYMGMT — key generation
  * ========================================================================= */
 
-static void *stse_keymgmt_gen_init(void *vprovctx, int selection,
-                                    const OSSL_PARAM params[])
+static void *stsafea110_ec_keymgmt_gen_init(void *vprovctx, int selection,
+                                            const OSSL_PARAM params[])
 {
     if (!(selection & OSSL_KEYMGMT_SELECT_KEYPAIR)) return NULL;
 
     stse_genctx_t *gctx = OPENSSL_zalloc(sizeof(*gctx));
     if (!gctx) return NULL;
 
-    gctx->provctx = (stse_provctx_t *)vprovctx;
-    gctx->slot    = 0;
-    gctx->bus_id  = 1;
+    gctx->provctx    = (stse_provctx_t *)vprovctx;
+    gctx->curve_type = STSE_ECC_KT_NIST_P_256; /* default */
+    gctx->slot       = 0;
+    gctx->bus_id     = 1;
+    gctx->dev_addr   = 0x20; /* default STSAFE-A110 I²C address */
 
     if (params)
         stse_keymgmt_gen_set_params(gctx, params);
@@ -526,32 +392,8 @@ static void *stse_keymgmt_gen_init(void *vprovctx, int selection,
     return gctx;
 }
 
-static void *stsafea_ec_keymgmt_gen_init(void *vprovctx, int selection,
-                                         const OSSL_PARAM params[])
-{
-    stse_genctx_t *gctx = stse_keymgmt_gen_init(vprovctx, selection, params);
-    if (gctx) {
-        gctx->key_type   = STSE_KEY_TYPE_EC;
-        gctx->curve_type = STSE_ECC_KT_NIST_P_256; /* default */
-        gctx->dev_addr   = 0x20; /* default STSAFE-A120 I²C address */
-    }
-    return gctx;
-}
-
-static void *stsafea_x25519_keymgmt_gen_init(void *vprovctx, int selection,
-                                             const OSSL_PARAM params[])
-{
-    stse_genctx_t *gctx = stse_keymgmt_gen_init(vprovctx, selection, params);
-    if (gctx) {
-        gctx->key_type   = STSE_KEY_TYPE_X25519;
-        gctx->curve_type = STSE_ECC_KT_CURVE25519;
-        gctx->dev_addr   = 0x20; /* default STSAFE-A120 I²C address */
-    }
-    return gctx;
-}
-
 static int stse_keymgmt_gen_set_params(void *vgenctx,
-                                        const OSSL_PARAM params[])
+                                       const OSSL_PARAM params[])
 {
     stse_genctx_t *gctx = (stse_genctx_t *)vgenctx;
     const OSSL_PARAM *p;
@@ -576,7 +418,7 @@ static int stse_keymgmt_gen_set_params(void *vgenctx,
     }
 
     p = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_GROUP_NAME);
-    if (p && gctx->key_type == STSE_KEY_TYPE_EC) {
+    if (p) {
         char name[64];
         char *pname = name;
         if (!OSSL_PARAM_get_utf8_string(p, &pname, sizeof(name)))
@@ -604,7 +446,7 @@ static const OSSL_PARAM stse_keymgmt_gen_settable_params_tab[] = {
 };
 
 static const OSSL_PARAM *stse_keymgmt_gen_settable_params(void *vgenctx,
-                                                           void *vprovctx)
+                                                          void *vprovctx)
 {
     (void)vgenctx; (void)vprovctx;
     return stse_keymgmt_gen_settable_params_tab;
@@ -616,72 +458,47 @@ static void *stse_keymgmt_gen(void *vgenctx, OSSL_CALLBACK *cb, void *cbarg)
     stse_genctx_t  *gctx = (stse_genctx_t *)vgenctx;
     stse_provctx_t *pctx = gctx->provctx;
 
-    if (!provctx_ensure_init(pctx, gctx->bus_id, gctx->dev_addr, STSAFE_A120)) return NULL;
+    if (!provctx_ensure_init(pctx, gctx->bus_id, gctx->dev_addr, STSAFE_A110)) return NULL;
 
-    if (gctx->key_type == STSE_KEY_TYPE_X25519) {
-        stse_key_t *key = (stse_key_t *)stsafea_x25519_keymgmt_new(pctx);
-        if (!key) return NULL;
-        key->slot     = gctx->slot;
-        key->bus_id   = gctx->bus_id;
-        key->dev_addr = gctx->dev_addr;
+    stse_key_t *key = (stse_key_t *)stsafea110_ec_keymgmt_new(pctx);
+    if (!key) return NULL;
+    key->slot       = gctx->slot;
+    key->bus_id     = gctx->bus_id;
+    key->dev_addr   = gctx->dev_addr;
+    key->curve_type = gctx->curve_type;
 
-        uint8_t raw_pub[32];
-        stse_ReturnCode_t rc = stse_generate_ecc_key_pair(&pctx->handler,
-                                                           gctx->slot,
-                                                           STSE_ECC_KT_CURVE25519,
-                                                           255, raw_pub);
-        if (rc != STSE_OK) {
-            fprintf(stderr, "[stsafea_provider] X25519 keygen slot=%u bus=%u: err %d\n",
-                    gctx->slot, gctx->bus_id, rc);
-            stse_keymgmt_free(key);
-            return NULL;
+    size_t field_len = 32;
+    for (int i = 0; ec_curves[i].name != NULL; i++) {
+        if (ec_curves[i].type == gctx->curve_type) {
+            field_len = ec_curves[i].coord_len;
+            break;
         }
-
-        memcpy(key->pub_point, raw_pub, 32);
-        key->pub_len = 32;
-        key->has_pub = 1;
-        return key;
-    } else {
-        stse_key_t *key = (stse_key_t *)stsafea_ec_keymgmt_new(pctx);
-        if (!key) return NULL;
-        key->slot       = gctx->slot;
-        key->bus_id     = gctx->bus_id;
-        key->dev_addr   = gctx->dev_addr;
-        key->curve_type = gctx->curve_type;
-
-        size_t field_len = 32;
-        for (int i = 0; ec_curves[i].name != NULL; i++) {
-            if (ec_curves[i].type == gctx->curve_type) {
-                field_len = ec_curves[i].coord_len;
-                break;
-            }
-        }
-
-        uint8_t *raw_pub = OPENSSL_malloc(field_len * 2);
-        if (!raw_pub) {
-            stse_keymgmt_free(key);
-            return NULL;
-        }
-
-        stse_ReturnCode_t rc = stse_generate_ecc_key_pair(&pctx->handler,
-                                                           gctx->slot,
-                                                           gctx->curve_type,
-                                                           255, raw_pub);
-        if (rc != STSE_OK) {
-            fprintf(stderr, "[stsafea_provider] EC keygen curve=%u slot=%u bus=%u: err %d\n",
-                    gctx->curve_type, gctx->slot, gctx->bus_id, rc);
-            OPENSSL_free(raw_pub);
-            stse_keymgmt_free(key);
-            return NULL;
-        }
-
-        key->pub_point[0] = 0x04; /* uncompressed prefix */
-        memcpy(key->pub_point + 1, raw_pub, field_len * 2);
-        key->pub_len = 1 + field_len * 2;
-        key->has_pub = 1;
-        OPENSSL_free(raw_pub);
-        return key;
     }
+
+    uint8_t *raw_pub = OPENSSL_malloc(field_len * 2);
+    if (!raw_pub) {
+        stse_keymgmt_free(key);
+        return NULL;
+    }
+
+    stse_ReturnCode_t rc = stse_generate_ecc_key_pair(&pctx->handler,
+                                                       gctx->slot,
+                                                       gctx->curve_type,
+                                                       255, raw_pub);
+    if (rc != STSE_OK) {
+        fprintf(stderr, "[stsafea110_provider] EC keygen curve=%u slot=%u bus=%u: err %d\n",
+                gctx->curve_type, gctx->slot, gctx->bus_id, rc);
+        OPENSSL_free(raw_pub);
+        stse_keymgmt_free(key);
+        return NULL;
+    }
+
+    key->pub_point[0] = 0x04; /* uncompressed prefix */
+    memcpy(key->pub_point + 1, raw_pub, field_len * 2);
+    key->pub_len = 1 + field_len * 2;
+    key->has_pub = 1;
+    OPENSSL_free(raw_pub);
+    return key;
 }
 
 static void stse_keymgmt_gen_cleanup(void *vgenctx)
@@ -689,16 +506,10 @@ static void stse_keymgmt_gen_cleanup(void *vgenctx)
     OPENSSL_free(vgenctx);
 }
 
-static const char *stsafea_ec_keymgmt_query_operation_name(int operation_id)
+static const char *stsafea110_ec_keymgmt_query_operation_name(int operation_id)
 {
     if (operation_id == OSSL_OP_SIGNATURE)
         return "ECDSA";
-    return NULL;
-}
-
-static const char *stsafea_x25519_keymgmt_query_operation_name(int operation_id)
-{
-    (void)operation_id;
     return NULL;
 }
 
@@ -710,8 +521,6 @@ static int do_hw_sign(stse_provctx_t *pctx, stse_key_t *key,
                       const unsigned char *digest, size_t digest_len,
                       unsigned char *sig, size_t *siglen, size_t sigsize)
 {
-    if (key->key_type != STSE_KEY_TYPE_EC) return 0;
-
     size_t field_len = 32;
     for (int i = 0; ec_curves[i].name != NULL; i++) {
         if (ec_curves[i].type == key->curve_type) {
@@ -727,7 +536,7 @@ static int do_hw_sign(stse_provctx_t *pctx, stse_key_t *key,
         return 1;
     }
 
-    if (!provctx_ensure_init(pctx, key->bus_id, key->dev_addr, STSAFE_A120)) return 0;
+    if (!provctx_ensure_init(pctx, key->bus_id, key->dev_addr, STSAFE_A110)) return 0;
 
     uint8_t *raw_sig = OPENSSL_malloc(field_len * 2);
     if (!raw_sig) return 0;
@@ -738,7 +547,7 @@ static int do_hw_sign(stse_provctx_t *pctx, stse_key_t *key,
                                                         digest, (PLAT_UI16)digest_len,
                                                         raw_sig);
     if (rc != STSE_OK) {
-        fprintf(stderr, "[stsafea_provider] sign curve=%u slot=%u: err %d\n",
+        fprintf(stderr, "[stsafea110_provider] sign curve=%u slot=%u: err %d\n",
                 key->curve_type, key->slot, rc);
         OPENSSL_free(raw_sig);
         return 0;
@@ -775,9 +584,7 @@ static int do_hw_verify(stse_provctx_t *pctx, stse_key_t *key,
                         const unsigned char *sig, size_t siglen,
                         const unsigned char *digest, size_t digest_len)
 {
-    if (key->key_type != STSE_KEY_TYPE_EC) return 0;
-
-    if (!provctx_ensure_init(pctx, key->bus_id, key->dev_addr, STSAFE_A120)) return 0;
+    if (!provctx_ensure_init(pctx, key->bus_id, key->dev_addr, STSAFE_A110)) return 0;
 
     size_t field_len = 32;
     for (int i = 0; ec_curves[i].name != NULL; i++) {
@@ -829,7 +636,7 @@ static int do_hw_verify(stse_provctx_t *pctx, stse_key_t *key,
     OPENSSL_free(raw_sig);
 
     if (rc != STSE_OK) {
-        fprintf(stderr, "[stsafea_provider] verify curve=%u slot=%u: err %d\n",
+        fprintf(stderr, "[stsafea110_provider] verify curve=%u slot=%u: err %d\n",
                 key->curve_type, key->slot, rc);
         return 0;
     }
@@ -874,18 +681,20 @@ static void *stse_sig_dupctx(void *vsigctx)
             return NULL;
         }
     }
+    strncpy(dst->md_name, src->md_name, sizeof(dst->md_name) - 1);
     return dst;
 }
 
 static int stse_sig_sign_init(void *vsigctx, void *vkey,
                                const OSSL_PARAM params[])
 {
-    (void)params;
     stse_sigctx_t *sctx = (stse_sigctx_t *)vsigctx;
     sctx->key = (stse_key_t *)vkey;
     if (!sctx->key) return 0;
     EVP_MD_CTX_free(sctx->md_ctx);
     sctx->md_ctx = NULL;
+    if (params)
+        stse_sig_set_ctx_params(sctx, params);
     return 1;
 }
 
@@ -902,12 +711,13 @@ static int stse_sig_sign(void *vsigctx,
 static int stse_sig_verify_init(void *vsigctx, void *vkey,
                                  const OSSL_PARAM params[])
 {
-    (void)params;
     stse_sigctx_t *sctx = (stse_sigctx_t *)vsigctx;
     sctx->key = (stse_key_t *)vkey;
     if (!sctx->key) return 0;
     EVP_MD_CTX_free(sctx->md_ctx);
     sctx->md_ctx = NULL;
+    if (params)
+        stse_sig_set_ctx_params(sctx, params);
     return 1;
 }
 
@@ -924,15 +734,17 @@ static int stse_sig_verify(void *vsigctx,
 static int stse_sig_digest_sign_init(void *vsigctx, const char *mdname,
                                       void *vkey, const OSSL_PARAM params[])
 {
-    (void)params;
     stse_sigctx_t *sctx = (stse_sigctx_t *)vsigctx;
     sctx->key = (stse_key_t *)vkey;
     if (!sctx->key) return 0;
 
     const char *digest_name = (mdname && *mdname) ? mdname : "SHA2-256";
+    strncpy(sctx->md_name, digest_name, sizeof(sctx->md_name) - 1);
+    sctx->md_name[sizeof(sctx->md_name) - 1] = '\0';
+
     const EVP_MD *md = EVP_get_digestbyname(digest_name);
     if (!md) {
-        fprintf(stderr, "[stsafea_provider] unknown digest: %s\n", digest_name);
+        fprintf(stderr, "[stsafea110_provider] unknown digest: %s\n", digest_name);
         return 0;
     }
 
@@ -944,6 +756,8 @@ static int stse_sig_digest_sign_init(void *vsigctx, const char *mdname,
         sctx->md_ctx = NULL;
         return 0;
     }
+    if (params)
+        stse_sig_set_ctx_params(sctx, params);
     return 1;
 }
 
@@ -988,15 +802,17 @@ static int stse_sig_digest_sign_final(void *vsigctx,
 static int stse_sig_digest_verify_init(void *vsigctx, const char *mdname,
                                         void *vkey, const OSSL_PARAM params[])
 {
-    (void)params;
     stse_sigctx_t *sctx = (stse_sigctx_t *)vsigctx;
     sctx->key = (stse_key_t *)vkey;
     if (!sctx->key) return 0;
 
     const char *digest_name = (mdname && *mdname) ? mdname : "SHA2-256";
+    strncpy(sctx->md_name, digest_name, sizeof(sctx->md_name) - 1);
+    sctx->md_name[sizeof(sctx->md_name) - 1] = '\0';
+
     const EVP_MD *md = EVP_get_digestbyname(digest_name);
     if (!md) {
-        fprintf(stderr, "[stsafea_provider] unknown digest: %s\n", digest_name);
+        fprintf(stderr, "[stsafea110_provider] unknown digest: %s\n", digest_name);
         return 0;
     }
 
@@ -1008,6 +824,8 @@ static int stse_sig_digest_verify_init(void *vsigctx, const char *mdname,
         sctx->md_ctx = NULL;
         return 0;
     }
+    if (params)
+        stse_sig_set_ctx_params(sctx, params);
     return 1;
 }
 
@@ -1035,13 +853,50 @@ static int stse_sig_digest_verify_final(void *vsigctx,
                         sig, siglen, digest, dlen);
 }
 
+static int stse_get_sig_aid(const char *mdname, unsigned char *out, size_t *out_len)
+{
+    int md_nid = NID_undef;
+    if (!mdname || *mdname == '\0' || strcasecmp(mdname, "SHA2-256") == 0 || strcasecmp(mdname, "SHA256") == 0)
+        md_nid = NID_sha256;
+    else if (strcasecmp(mdname, "SHA2-384") == 0 || strcasecmp(mdname, "SHA384") == 0)
+        md_nid = NID_sha384;
+    else if (strcasecmp(mdname, "SHA2-512") == 0 || strcasecmp(mdname, "SHA512") == 0)
+        md_nid = NID_sha512;
+    else if (strcasecmp(mdname, "SHA1") == 0)
+        md_nid = NID_sha1;
+    else
+        md_nid = OBJ_sn2nid(mdname);
+
+    int sig_nid = NID_undef;
+    if (OBJ_find_sigid_by_algs(&sig_nid, md_nid, NID_X9_62_id_ecPublicKey) != 1)
+        return 0;
+
+    X509_ALGOR *alg = X509_ALGOR_new();
+    if (!alg) return 0;
+    X509_ALGOR_set0(alg, OBJ_nid2obj(sig_nid), V_ASN1_UNDEF, NULL);
+    unsigned char *der = NULL;
+    int len = i2d_X509_ALGOR(alg, &der);
+    X509_ALGOR_free(alg);
+    if (len <= 0 || !der) return 0;
+
+    if (*out_len < (size_t)len) {
+        OPENSSL_free(der);
+        return 0;
+    }
+    memcpy(out, der, len);
+    *out_len = (size_t)len;
+    OPENSSL_free(der);
+    return 1;
+}
+
 static const OSSL_PARAM stse_sig_gettable_ctx_params_tab[] = {
     OSSL_PARAM_utf8_string(OSSL_SIGNATURE_PARAM_DIGEST, NULL, 0),
+    OSSL_PARAM_octet_string(OSSL_SIGNATURE_PARAM_ALGORITHM_ID, NULL, 0),
     OSSL_PARAM_END
 };
 
 static const OSSL_PARAM *stse_sig_gettable_ctx_params(void *vsigctx,
-                                                        void *vprovctx)
+                                                      void *vprovctx)
 {
     (void)vsigctx; (void)vprovctx;
     return stse_sig_gettable_ctx_params_tab;
@@ -1049,10 +904,22 @@ static const OSSL_PARAM *stse_sig_gettable_ctx_params(void *vsigctx,
 
 static int stse_sig_get_ctx_params(void *vsigctx, OSSL_PARAM params[])
 {
-    (void)vsigctx;
+    stse_sigctx_t *sctx = (stse_sigctx_t *)vsigctx;
+    const char *md = (sctx && sctx->md_name[0]) ? sctx->md_name : "SHA2-256";
+
     OSSL_PARAM *p = OSSL_PARAM_locate(params, OSSL_SIGNATURE_PARAM_DIGEST);
-    if (p && !OSSL_PARAM_set_utf8_string(p, "SHA2-256"))
+    if (p && !OSSL_PARAM_set_utf8_string(p, md))
         return 0;
+
+    p = OSSL_PARAM_locate(params, OSSL_SIGNATURE_PARAM_ALGORITHM_ID);
+    if (p) {
+        unsigned char aid[64];
+        size_t aid_len = sizeof(aid);
+        if (!stse_get_sig_aid(md, aid, &aid_len))
+            return 0;
+        if (!OSSL_PARAM_set_octet_string(p, aid, aid_len))
+            return 0;
+    }
     return 1;
 }
 
@@ -1062,7 +929,7 @@ static const OSSL_PARAM stse_sig_settable_ctx_params_tab[] = {
 };
 
 static const OSSL_PARAM *stse_sig_settable_ctx_params(void *vsigctx,
-                                                        void *vprovctx)
+                                                      void *vprovctx)
 {
     (void)vsigctx; (void)vprovctx;
     return stse_sig_settable_ctx_params_tab;
@@ -1070,53 +937,52 @@ static const OSSL_PARAM *stse_sig_settable_ctx_params(void *vsigctx,
 
 static int stse_sig_set_ctx_params(void *vsigctx, const OSSL_PARAM params[])
 {
-    (void)vsigctx; (void)params;
+    stse_sigctx_t *sctx = (stse_sigctx_t *)vsigctx;
+    if (!sctx || !params) return 1;
+
+    const OSSL_PARAM *p = OSSL_PARAM_locate_const(params, OSSL_SIGNATURE_PARAM_DIGEST);
+    if (p) {
+        char name[64];
+        char *pname = name;
+        if (OSSL_PARAM_get_utf8_string(p, &pname, sizeof(name))) {
+            strncpy(sctx->md_name, name, sizeof(sctx->md_name) - 1);
+            sctx->md_name[sizeof(sctx->md_name) - 1] = '\0';
+        }
+    }
     return 1;
+}
+
+static void *stsafea110_ec_keymgmt_load(const void *ref, size_t ref_len)
+{
+    if (!ref || ref_len != sizeof(stse_key_t *)) return NULL;
+    return *(stse_key_t **)ref;
 }
 
 /* =========================================================================
  * Dispatch tables
  * ========================================================================= */
 
-static const OSSL_DISPATCH stsafea_ec_keymgmt_functions[] = {
-    { OSSL_FUNC_KEYMGMT_NEW,                  (void (*)(void))stsafea_ec_keymgmt_new },
+static const OSSL_DISPATCH stsafea110_ec_keymgmt_functions[] = {
+    { OSSL_FUNC_KEYMGMT_NEW,                  (void (*)(void))stsafea110_ec_keymgmt_new },
+    { OSSL_FUNC_KEYMGMT_LOAD,                 (void (*)(void))stsafea110_ec_keymgmt_load },
     { OSSL_FUNC_KEYMGMT_FREE,                 (void (*)(void))stse_keymgmt_free },
-    { OSSL_FUNC_KEYMGMT_HAS,                  (void (*)(void))stsafea_ec_keymgmt_has },
-    { OSSL_FUNC_KEYMGMT_GET_PARAMS,           (void (*)(void))stsafea_ec_keymgmt_get_params },
+    { OSSL_FUNC_KEYMGMT_HAS,                  (void (*)(void))stsafea110_ec_keymgmt_has },
+    { OSSL_FUNC_KEYMGMT_GET_PARAMS,           (void (*)(void))stsafea110_ec_keymgmt_get_params },
     { OSSL_FUNC_KEYMGMT_GETTABLE_PARAMS,      (void (*)(void))stse_keymgmt_gettable_params },
-    { OSSL_FUNC_KEYMGMT_EXPORT,               (void (*)(void))stsafea_ec_keymgmt_export },
-    { OSSL_FUNC_KEYMGMT_EXPORT_TYPES,         (void (*)(void))stsafea_ec_keymgmt_export_types },
-    { OSSL_FUNC_KEYMGMT_IMPORT,               (void (*)(void))stsafea_ec_keymgmt_import },
-    { OSSL_FUNC_KEYMGMT_IMPORT_TYPES,         (void (*)(void))stsafea_ec_keymgmt_import_types },
-    { OSSL_FUNC_KEYMGMT_GEN_INIT,             (void (*)(void))stsafea_ec_keymgmt_gen_init },
+    { OSSL_FUNC_KEYMGMT_EXPORT,               (void (*)(void))stsafea110_ec_keymgmt_export },
+    { OSSL_FUNC_KEYMGMT_EXPORT_TYPES,         (void (*)(void))stsafea110_ec_keymgmt_export_types },
+    { OSSL_FUNC_KEYMGMT_IMPORT,               (void (*)(void))stsafea110_ec_keymgmt_import },
+    { OSSL_FUNC_KEYMGMT_IMPORT_TYPES,         (void (*)(void))stsafea110_ec_keymgmt_import_types },
+    { OSSL_FUNC_KEYMGMT_GEN_INIT,             (void (*)(void))stsafea110_ec_keymgmt_gen_init },
     { OSSL_FUNC_KEYMGMT_GEN_SET_PARAMS,       (void (*)(void))stse_keymgmt_gen_set_params },
     { OSSL_FUNC_KEYMGMT_GEN_SETTABLE_PARAMS,   (void (*)(void))stse_keymgmt_gen_settable_params },
     { OSSL_FUNC_KEYMGMT_GEN,                  (void (*)(void))stse_keymgmt_gen },
     { OSSL_FUNC_KEYMGMT_GEN_CLEANUP,          (void (*)(void))stse_keymgmt_gen_cleanup },
-    { OSSL_FUNC_KEYMGMT_QUERY_OPERATION_NAME, (void (*)(void))stsafea_ec_keymgmt_query_operation_name },
+    { OSSL_FUNC_KEYMGMT_QUERY_OPERATION_NAME, (void (*)(void))stsafea110_ec_keymgmt_query_operation_name },
     OSSL_DISPATCH_END
 };
 
-static const OSSL_DISPATCH stsafea_x25519_keymgmt_functions[] = {
-    { OSSL_FUNC_KEYMGMT_NEW,                  (void (*)(void))stsafea_x25519_keymgmt_new },
-    { OSSL_FUNC_KEYMGMT_FREE,                 (void (*)(void))stse_keymgmt_free },
-    { OSSL_FUNC_KEYMGMT_HAS,                  (void (*)(void))stsafea_x25519_keymgmt_has },
-    { OSSL_FUNC_KEYMGMT_GET_PARAMS,           (void (*)(void))stsafea_x25519_keymgmt_get_params },
-    { OSSL_FUNC_KEYMGMT_GETTABLE_PARAMS,      (void (*)(void))stse_keymgmt_gettable_params },
-    { OSSL_FUNC_KEYMGMT_EXPORT,               (void (*)(void))stsafea_x25519_keymgmt_export },
-    { OSSL_FUNC_KEYMGMT_EXPORT_TYPES,         (void (*)(void))stsafea_x25519_keymgmt_export_types },
-    { OSSL_FUNC_KEYMGMT_IMPORT,               (void (*)(void))stsafea_x25519_keymgmt_import },
-    { OSSL_FUNC_KEYMGMT_IMPORT_TYPES,         (void (*)(void))stsafea_x25519_keymgmt_import_types },
-    { OSSL_FUNC_KEYMGMT_GEN_INIT,             (void (*)(void))stsafea_x25519_keymgmt_gen_init },
-    { OSSL_FUNC_KEYMGMT_GEN_SET_PARAMS,       (void (*)(void))stse_keymgmt_gen_set_params },
-    { OSSL_FUNC_KEYMGMT_GEN_SETTABLE_PARAMS,   (void (*)(void))stse_keymgmt_gen_settable_params },
-    { OSSL_FUNC_KEYMGMT_GEN,                  (void (*)(void))stse_keymgmt_gen },
-    { OSSL_FUNC_KEYMGMT_GEN_CLEANUP,          (void (*)(void))stse_keymgmt_gen_cleanup },
-    { OSSL_FUNC_KEYMGMT_QUERY_OPERATION_NAME, (void (*)(void))stsafea_x25519_keymgmt_query_operation_name },
-    OSSL_DISPATCH_END
-};
-
-static const OSSL_DISPATCH stsafea_ecdsa_functions[] = {
+static const OSSL_DISPATCH stsafea110_ecdsa_functions[] = {
     { OSSL_FUNC_SIGNATURE_NEWCTX,             (void (*)(void))stse_sig_newctx },
     { OSSL_FUNC_SIGNATURE_FREECTX,            (void (*)(void))stse_sig_freectx },
     { OSSL_FUNC_SIGNATURE_DUPCTX,             (void (*)(void))stse_sig_dupctx },
@@ -1141,41 +1007,370 @@ static const OSSL_DISPATCH stsafea_ecdsa_functions[] = {
  * Algorithm tables
  * ========================================================================= */
 
-static const OSSL_ALGORITHM stsafea_keymgmt_algs[] = {
+
+/* =========================================================================
+ * ENCODER & DECODER — PEM serialization for hardware-backed keys (RFC 5915)
+ * ========================================================================= */
+
+static void *stsafea110_enc_newctx(void *provctx) { return provctx; }
+static void  stsafea110_enc_freectx(void *ctx) { (void)ctx; }
+
+static int stsafea110_enc_encode(void *vctx, OSSL_CORE_BIO *cout,
+                                 const void *vkey, const OSSL_PARAM key_abstract[],
+                                 int selection, OSSL_PASSPHRASE_CALLBACK *cb, void *cbarg)
+{
+    (void)key_abstract; (void)selection; (void)cb; (void)cbarg;
+    stse_provctx_t *pctx = (stse_provctx_t *)vctx;
+    const stse_key_t *key = (const stse_key_t *)vkey;
+    if (!pctx || !key || !pctx->bio_puts) return 0;
+
+    const char *grp_name = "prime256v1";
+    for (int i = 0; ec_curves[i].name != NULL; i++) {
+        if (ec_curves[i].type == key->curve_type) {
+            grp_name = ec_curves[i].name;
+            break;
+        }
+    }
+
+    int nid = OBJ_sn2nid(grp_name);
+    if (nid == NID_undef)
+        nid = NID_X9_62_prime256v1;
+
+    ASN1_OBJECT *curve_obj = OBJ_nid2obj(nid);
+    unsigned char oid_der[64];
+    unsigned char *p_oid = oid_der;
+    int oid_der_len = i2d_ASN1_OBJECT(curve_obj, &p_oid);
+    if (oid_der_len <= 0) return 0;
+
+    /* Build RFC 5915 EC PRIVATE KEY DER structure:
+     * SEQUENCE {
+     *   INTEGER 1 (version)
+     *   OCTET STRING (32 bytes: "STSE" || bus_id || slot || dev_addr || 25 bytes zeroes)
+     *   [0] EXPLICIT { OBJECT IDENTIFIER curve }
+     *   [1] EXPLICIT { BIT STRING 00 || pub_point }
+     * }
+     */
+    unsigned char body[512];
+    unsigned char *bp = body;
+
+    /* 1. version: INTEGER 1 */
+    *bp++ = 0x02;
+    *bp++ = 0x01;
+    *bp++ = 0x01;
+
+    /* 2. privateKey: OCTET STRING 32 bytes */
+    *bp++ = 0x04;
+    *bp++ = 32;
+    memcpy(bp, "STSE", 4);
+    bp[4] = key->bus_id;
+    bp[5] = key->slot;
+    bp[6] = key->dev_addr;
+    memset(bp + 7, 0, 25);
+    bp += 32;
+
+    /* 3. parameters: [0] EXPLICIT */
+    *bp++ = 0xA0;
+    *bp++ = (unsigned char)oid_der_len;
+    memcpy(bp, oid_der, oid_der_len);
+    bp += oid_der_len;
+
+    /* 4. publicKey: [1] EXPLICIT */
+    if (key->pub_len > 0) {
+        *bp++ = 0xA1;
+        *bp++ = (unsigned char)(key->pub_len + 3); /* tag(1) + len(1) + pad(1) + pub_len */
+        *bp++ = 0x03;                              /* BIT STRING */
+        *bp++ = (unsigned char)(key->pub_len + 1);
+        *bp++ = 0x00;                              /* 0 unused bits */
+        memcpy(bp, key->pub_point, key->pub_len);
+        bp += key->pub_len;
+    }
+
+    size_t body_len = bp - body;
+    unsigned char der[512];
+    unsigned char *p = der;
+    *p++ = 0x30;
+    if (body_len < 128) {
+        *p++ = (unsigned char)body_len;
+    } else {
+        *p++ = 0x81;
+        *p++ = (unsigned char)body_len;
+    }
+    memcpy(p, body, body_len);
+    p += body_len;
+
+    size_t total_der = p - der;
+    BIO *mem = BIO_new(BIO_s_mem());
+    if (!mem) return 0;
+    if (!PEM_write_bio(mem, "EC PRIVATE KEY", "", der, total_der)) {
+        BIO_free(mem);
+        return 0;
+    }
+
+    char *pem_data = NULL;
+    long pem_len = BIO_get_mem_data(mem, &pem_data);
+    int ok = 0;
+    if (pem_len > 0 && pem_data) {
+        if (pctx->bio_write_ex) {
+            size_t written = 0;
+            ok = pctx->bio_write_ex(cout, pem_data, (size_t)pem_len, &written);
+        } else if (pctx->bio_puts) {
+            ok = pctx->bio_puts(cout, pem_data);
+        }
+    }
+    BIO_free(mem);
+    return ok;
+}
+
+static const OSSL_DISPATCH stsafea110_encoder_functions[] = {
+    { OSSL_FUNC_ENCODER_NEWCTX,  (void (*)(void))stsafea110_enc_newctx },
+    { OSSL_FUNC_ENCODER_FREECTX, (void (*)(void))stsafea110_enc_freectx },
+    { OSSL_FUNC_ENCODER_ENCODE,  (void (*)(void))stsafea110_enc_encode },
+    OSSL_DISPATCH_END
+};
+
+static void *stsafea110_dec_newctx(void *provctx) { return provctx; }
+static void  stsafea110_dec_freectx(void *ctx) { (void)ctx; }
+
+static int parse_stsafe_der(const unsigned char *der, size_t der_len,
+                            uint8_t *bus_id, uint8_t *slot, uint8_t *dev_addr,
+                            char *curve_name, size_t curve_name_len,
+                            uint8_t *pub_point, size_t *pub_len)
+{
+    const unsigned char *p = der;
+    long len = der_len;
+    int tag, xclass;
+
+    if (ASN1_get_object(&p, &len, &tag, &xclass, len) & 0x80 || tag != V_ASN1_SEQUENCE)
+        return 0;
+
+    const unsigned char *body_end = p + len;
+    long vlen = body_end - p;
+    if (ASN1_get_object(&p, &vlen, &tag, &xclass, vlen) & 0x80 || tag != V_ASN1_INTEGER)
+        return 0;
+    p += vlen;
+
+    long olen = body_end - p;
+    if (ASN1_get_object(&p, &olen, &tag, &xclass, olen) & 0x80 || tag != V_ASN1_OCTET_STRING)
+        return 0;
+    if (olen < 7 || memcmp(p, "STSE", 4) != 0)
+        return 0;
+
+    *bus_id = p[4];
+    *slot = p[5];
+    *dev_addr = p[6];
+    p += olen;
+
+    long plen = body_end - p;
+    if (ASN1_get_object(&p, &plen, &tag, &xclass, plen) & 0x80 || tag != 0)
+        return 0;
+
+    const unsigned char *op = p;
+    ASN1_OBJECT *obj = d2i_ASN1_OBJECT(NULL, &op, plen);
+    if (obj) {
+        int nid = OBJ_obj2nid(obj);
+        const char *sn = OBJ_nid2sn(nid);
+        if (sn && curve_name && curve_name_len > 0) {
+            strncpy(curve_name, sn, curve_name_len - 1);
+            curve_name[curve_name_len - 1] = '\0';
+        }
+        ASN1_OBJECT_free(obj);
+    }
+    p += plen;
+
+    long klen = body_end - p;
+    if (ASN1_get_object(&p, &klen, &tag, &xclass, klen) & 0x80 || tag != 1)
+        return 0;
+
+    const unsigned char *kp = p;
+    long bit_len = klen;
+    if (ASN1_get_object(&kp, &bit_len, &tag, &xclass, bit_len) & 0x80 || tag != V_ASN1_BIT_STRING)
+        return 0;
+
+    if (bit_len > 1 && kp[0] == 0x00) {
+        kp++;
+        bit_len--;
+        memcpy(pub_point, kp, bit_len);
+        *pub_len = bit_len;
+    }
+    return 1;
+}
+
+static int stsafea110_dec_decode(void *vctx, OSSL_CORE_BIO *cin, int selection,
+                                 OSSL_CALLBACK *data_cb, void *data_cbarg,
+                                 OSSL_PASSPHRASE_CALLBACK *pw_cb, void *pw_cbarg)
+{
+    (void)selection; (void)pw_cb; (void)pw_cbarg;
+    stse_provctx_t *pctx = (stse_provctx_t *)vctx;
+    if (!pctx || !pctx->bio_read_ex) return 0;
+
+    unsigned char buf[4096];
+    size_t bytes_read = 0;
+    if (!pctx->bio_read_ex(cin, buf, sizeof(buf) - 1, &bytes_read) || bytes_read == 0)
+        return 0;
+    buf[bytes_read] = '\0';
+
+    stse_key_t *key = stsafea110_ec_keymgmt_new(pctx);
+    if (!key) return 0;
+
+    int decoded = 0;
+
+    /* First attempt: RFC 5915 DER format (whether read as raw DER or after pem2der) */
+    char curve_name[64] = {0};
+    if (parse_stsafe_der(buf, bytes_read, &key->bus_id, &key->slot, &key->dev_addr,
+                         curve_name, sizeof(curve_name),
+                         key->pub_point, &key->pub_len)) {
+        key->has_pub = (key->pub_len > 0) ? 1 : 0;
+        if (curve_name[0]) {
+            for (int i = 0; ec_curves[i].name != NULL; i++) {
+                if (strcasecmp(curve_name, ec_curves[i].name) == 0) {
+                    key->curve_type = ec_curves[i].type;
+                    break;
+                }
+            }
+        }
+        decoded = 1;
+    }
+
+    /* Second attempt: Check if buffer contains PEM "-----BEGIN EC PRIVATE KEY-----" */
+    if (!decoded && strstr((char *)buf, "-----BEGIN EC PRIVATE KEY-----")) {
+        BIO *mbio = BIO_new_mem_buf(buf, (int)bytes_read);
+        char *pname = NULL, *pheader = NULL;
+        unsigned char *pdata = NULL;
+        long plen = 0;
+        if (PEM_read_bio(mbio, &pname, &pheader, &pdata, &plen)) {
+            if (parse_stsafe_der(pdata, (size_t)plen, &key->bus_id, &key->slot, &key->dev_addr,
+                                 curve_name, sizeof(curve_name),
+                                 key->pub_point, &key->pub_len)) {
+                key->has_pub = (key->pub_len > 0) ? 1 : 0;
+                if (curve_name[0]) {
+                    for (int i = 0; ec_curves[i].name != NULL; i++) {
+                        if (strcasecmp(curve_name, ec_curves[i].name) == 0) {
+                            key->curve_type = ec_curves[i].type;
+                            break;
+                        }
+                    }
+                }
+                decoded = 1;
+            }
+            OPENSSL_free(pname);
+            OPENSSL_free(pheader);
+            OPENSSL_free(pdata);
+        }
+        BIO_free(mbio);
+    }
+
+    /* Third attempt: Legacy text format "-----BEGIN STSAFE PRIVATE KEY-----" */
+    if (!decoded && strstr((char *)buf, "-----BEGIN STSAFE PRIVATE KEY-----")) {
+        char *strbuf = (char *)buf;
+        char *p = strstr(strbuf, "Curve: ");
+        if (p) {
+            char cname[64] = {0};
+            sscanf(p + 7, "%63s", cname);
+            for (int i = 0; ec_curves[i].name != NULL; i++) {
+                if (strcasecmp(cname, ec_curves[i].name) == 0) {
+                    key->curve_type = ec_curves[i].type;
+                    break;
+                }
+            }
+        }
+
+        p = strstr(strbuf, "Bus: ");
+        if (p) key->bus_id = (uint8_t)atoi(p + 5);
+
+        p = strstr(strbuf, "Slot: ");
+        if (p) key->slot = (uint8_t)atoi(p + 6);
+
+        p = strstr(strbuf, "DevAddr: ");
+        if (p) {
+            unsigned int da = 0x20;
+            sscanf(p + 9, "%x", &da);
+            key->dev_addr = (uint8_t)da;
+        }
+
+        p = strstr(strbuf, "Public-Key: ");
+        if (p) {
+            char hex[256] = {0};
+            sscanf(p + 12, "%255s", hex);
+            size_t hlen = strlen(hex);
+            if (hlen > 0 && (hlen % 2 == 0) && (hlen / 2) <= sizeof(key->pub_point)) {
+                key->pub_len = hlen / 2;
+                for (size_t i = 0; i < key->pub_len; i++) {
+                    unsigned int byte = 0;
+                    sscanf(&hex[i * 2], "%02x", &byte);
+                    key->pub_point[i] = (uint8_t)byte;
+                }
+                key->has_pub = 1;
+            }
+        }
+        decoded = 1;
+    }
+
+    if (!decoded) {
+        stse_keymgmt_free(key);
+        return 0;
+    }
+
+    int obj_type = OSSL_OBJECT_PKEY;
+    OSSL_PARAM params[4];
+    params[0] = OSSL_PARAM_construct_int(OSSL_OBJECT_PARAM_TYPE, &obj_type);
+    params[1] = OSSL_PARAM_construct_utf8_string(OSSL_OBJECT_PARAM_DATA_TYPE, "EC", 0);
+    params[2] = OSSL_PARAM_construct_octet_string(OSSL_OBJECT_PARAM_REFERENCE, &key, sizeof(key));
+    params[3] = OSSL_PARAM_construct_end();
+
+    return data_cb(params, data_cbarg);
+}
+
+static const OSSL_DISPATCH stsafea110_decoder_functions[] = {
+    { OSSL_FUNC_DECODER_NEWCTX,  (void (*)(void))stsafea110_dec_newctx },
+    { OSSL_FUNC_DECODER_FREECTX, (void (*)(void))stsafea110_dec_freectx },
+    { OSSL_FUNC_DECODER_DECODE,  (void (*)(void))stsafea110_dec_decode },
+    OSSL_DISPATCH_END
+};
+
+static const OSSL_ALGORITHM stsafea110_keymgmt_algs[] = {
     {
         "EC:id-ecPublicKey:1.2.840.10045.2.1",
-        "provider=stsafea",
-        stsafea_ec_keymgmt_functions,
-        "STSAFE-A120 NIST & Brainpool hardware-backed EC key management"
-    },
-    {
-        "X25519:1.3.101.110",
-        "provider=stsafea",
-        stsafea_x25519_keymgmt_functions,
-        "STSAFE-A120 hardware-backed X25519 key management"
+        "provider=stsafe-a110",
+        stsafea110_ec_keymgmt_functions,
+        "STSAFE-A110 NIST & Brainpool (256/384-bit) hardware-backed EC key management"
     },
     { NULL, NULL, NULL, NULL }
 };
 
-static const OSSL_ALGORITHM stsafea_signature_algs[] = {
+static const OSSL_ALGORITHM stsafea110_signature_algs[] = {
     {
         "ECDSA:1.2.840.10045.4.3.2",
-        "provider=stsafea",
-        stsafea_ecdsa_functions,
-        "STSAFE-A120 hardware ECDSA signature"
+        "provider=stsafe-a110",
+        stsafea110_ecdsa_functions,
+        "STSAFE-A110 hardware ECDSA signature"
     },
     { NULL, NULL, NULL, NULL }
 };
 
-static const OSSL_ALGORITHM *stsafea_query_operation(void *vprovctx,
-                                                     int operation_id,
-                                                     int *no_cache)
+static const OSSL_ALGORITHM stsafea110_encoder_algs[] = {
+    { "EC", "provider=stsafe-a110,output=pem,structure=PrivateKeyInfo", stsafea110_encoder_functions, "STSAFE-A110 PEM Encoder" },
+    { "EC", "provider=stsafe-a110,output=pem,structure=type-specific",  stsafea110_encoder_functions, "STSAFE-A110 PEM Encoder" },
+    { NULL, NULL, NULL, NULL }
+};
+
+static const OSSL_ALGORITHM stsafea110_decoder_algs[] = {
+    { "EC", "provider=stsafe-a110,input=pem,structure=PrivateKeyInfo",  stsafea110_decoder_functions, "STSAFE-A110 PEM Decoder" },
+    { "EC", "provider=stsafe-a110,input=pem,structure=type-specific",   stsafea110_decoder_functions, "STSAFE-A110 PEM Decoder" },
+    { "EC", "provider=stsafe-a110,input=der,structure=type-specific",   stsafea110_decoder_functions, "STSAFE-A110 DER Decoder" },
+    { NULL, NULL, NULL, NULL }
+};
+
+static const OSSL_ALGORITHM *stsafea110_query_operation(void *vprovctx,
+                                                        int operation_id,
+                                                        int *no_cache)
 {
     (void)vprovctx;
     *no_cache = 0;
     switch (operation_id) {
-    case OSSL_OP_KEYMGMT:   return stsafea_keymgmt_algs;
-    case OSSL_OP_SIGNATURE: return stsafea_signature_algs;
+    case OSSL_OP_KEYMGMT:   return stsafea110_keymgmt_algs;
+    case OSSL_OP_SIGNATURE: return stsafea110_signature_algs;
+    case OSSL_OP_ENCODER:   return stsafea110_encoder_algs;
+    case OSSL_OP_DECODER:   return stsafea110_decoder_algs;
     default:                return NULL;
     }
 }
@@ -1203,7 +1398,7 @@ static int stse_prov_get_params(void *vprovctx, OSSL_PARAM params[])
     OSSL_PARAM *p;
 
     p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_NAME);
-    if (p && !OSSL_PARAM_set_utf8_ptr(p, "stsafea")) return 0;
+    if (p && !OSSL_PARAM_set_utf8_ptr(p, "stsafe-a110")) return 0;
 
     p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_VERSION);
     if (p && !OSSL_PARAM_set_utf8_ptr(p, "1.0.0")) return 0;
@@ -1225,7 +1420,7 @@ static const OSSL_DISPATCH stse_prov_functions[] = {
     { OSSL_FUNC_PROVIDER_TEARDOWN,             (void (*)(void))stse_prov_teardown },
     { OSSL_FUNC_PROVIDER_GETTABLE_PARAMS,      (void (*)(void))stse_prov_gettable_params },
     { OSSL_FUNC_PROVIDER_GET_PARAMS,           (void (*)(void))stse_prov_get_params },
-    { OSSL_FUNC_PROVIDER_QUERY_OPERATION,      (void (*)(void))stsafea_query_operation },
+    { OSSL_FUNC_PROVIDER_QUERY_OPERATION,      (void (*)(void))stsafea110_query_operation },
     OSSL_DISPATCH_END
 };
 
@@ -1237,13 +1432,22 @@ int OSSL_provider_init(const OSSL_CORE_HANDLE *handle,
                         const OSSL_DISPATCH   **out,
                         void                  **provctx)
 {
-    (void)in;
     stse_provctx_t *pctx = OPENSSL_zalloc(sizeof(*pctx));
     if (!pctx) return 0;
 
     pctx->handle        = handle;
     pctx->initialized   = 0;
     pctx->active_bus_id = 255;
+
+    if (in) {
+        for (; in->function_id != 0; in++) {
+            switch (in->function_id) {
+            case OSSL_FUNC_BIO_WRITE_EX: pctx->bio_write_ex = OSSL_FUNC_BIO_write_ex(in); break;
+            case OSSL_FUNC_BIO_READ_EX:  pctx->bio_read_ex  = OSSL_FUNC_BIO_read_ex(in);  break;
+            case OSSL_FUNC_BIO_PUTS:     pctx->bio_puts     = OSSL_FUNC_BIO_puts(in);     break;
+            }
+        }
+    }
 
     *provctx = pctx;
     *out     = stse_prov_functions;

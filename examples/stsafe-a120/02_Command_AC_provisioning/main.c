@@ -117,11 +117,11 @@ int main(int argc, char *argv[]) {
     PLAT_UI8               put_cmd_enc_header[] = {0x10, 0x2A, 0x2D};
     PLAT_UI8               rsp_header;
 
-    stse_frame_allocate(CmdFrame);
-    stse_frame_allocate(RspFrame);
-    stse_frame_element_allocate_push(&CmdFrame, eCmd_header,  3,                        NULL);
-    stse_frame_element_allocate_push(&CmdFrame, eCmd_payload, sizeof(command_AC_table), NULL);
-    stse_frame_element_allocate_push(&RspFrame, eRsp_header,  1,                        &rsp_header);
+    STSE_FRAME_ALLOCATE(CmdFrame);
+    STSE_FRAME_ALLOCATE(RspFrame);
+    STSE_FRAME_ELEMENT_ALLOCATE_PUSH(&CmdFrame, eCmd_header,  3,                        NULL);
+    STSE_FRAME_ELEMENT_ALLOCATE_PUSH(&CmdFrame, eCmd_payload, sizeof(command_AC_table), NULL);
+    STSE_FRAME_ELEMENT_ALLOCATE_PUSH(&RspFrame, eRsp_header,  1,                        &rsp_header);
 
     apps_terminal_init(115200);
 

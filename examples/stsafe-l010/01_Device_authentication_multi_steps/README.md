@@ -1,4 +1,3 @@
-
 # STSAFE-L Accessory authentication
 
 This project illustrates how to use the STSAFE-L Secure Element and STMicroelectronics Secure Element Library to perform device/accessory authentication.<br>
@@ -25,20 +24,24 @@ sequenceDiagram
     deactivate AUTH
 ```
 
-The example applicative flowchart is illustrated below :
+## Applicative Flowchart
 
 ```mermaid
 flowchart TD
-    A["MAIN"] --> B["Initialize Apps terminal \n(baudrate = 115200)"]
-    B --> C["Print example title and instructions"]
-    C --> D["Initialize STSE Handler"]
-    D --> E["Parse and print Root CA certificate"]
-    E --> F["Get STSAFE-L leaf-certificate"]
-    F --> G["Parse and print STSAFE-L leaf-certificate"]
-    G --> H["Verify device certificate signature using Root CA public key"]
-    H --> I["Generate Challenge \n(Random Number)"]
-    I --> J["Get Challenge signature from STSAFE-L "]
-    J --> K["Verify signature using STSAFE-L pubkey"]
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_certificate_parse(Root CA)"]
+    D --> E["stse_get_device_certificate_size()"]
+    E --> F["stse_get_device_certificate()"]
+    F --> G["stse_certificate_parse(Device Cert)"]
+    G --> H["stse_certificate_is_parent()"]
+    H --> I["stse_certificate_verify_signature(Device Cert)"]
+    I --> J["Generate Random Challenge Nonce"]
+    J --> K["stse_ecc_generate_signature(Challenge)"]
+    K --> L["stse_certificate_verify_signature(Challenge Sig)"]
+    L --> M{"Signature Verified?"}
+    M -- Yes --> N["Authentication Success"]
+    M -- No --> O["Authentication Failed"]
 ```
 
 STSELib API used in the example are the following :

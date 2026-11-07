@@ -4,6 +4,20 @@
 
 Demonstrates the monotonic counter functionality of the STSAFE-A120.  The example reads the current counter value, increments it, and reads it back to verify the increment.  Monotonic counters are used for anti-replay protection, firmware version tracking, and tamper-evidence.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_data_storage_read_counter_zone(Initial)"]
+    D --> E["stse_data_storage_decrement_counter_zone()"]
+    E --> F["stse_data_storage_read_counter_zone(Verify)"]
+    F --> G{"Counter Decremented by 1?"}
+    G -- Yes --> H["Success"]
+    G -- No --> I["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -16,7 +30,7 @@ Demonstrates the monotonic counter functionality of the STSAFE-A120.  The exampl
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a counter-type data zone |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

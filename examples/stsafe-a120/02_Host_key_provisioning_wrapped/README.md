@@ -9,6 +9,19 @@ The example:
 2. Wraps it with a KEK using `stse_platform_aes_key_wrap` (AES-256 key wrap, RFC 3394).
 3. Sends the wrapped key to the STSAFE-A120 via `stsafea_put_host_key_wrapped`.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["Wrap Host Key with KEK (AES Key Wrap)"]
+    D --> E["stse_host_key_provisioning_wrapped()"]
+    E --> F{"Status == STSE_OK?"}
+    F -- Yes --> G["Wrapped Host Key Provisioned"]
+    F -- No --> H["Error / Halt"]
+```
+
 ## Architecture
 
 ```
@@ -22,7 +35,7 @@ The example:
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with host key slot in writable state and matching KEK pre-provisioned |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

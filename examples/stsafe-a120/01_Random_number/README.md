@@ -4,6 +4,18 @@
 
 Demonstrates the True Random Number Generator (TRNG) embedded in the STSAFE-A120.  The example requests 64 bytes of random data from the device using `stse_generate_random` and prints the result.  Useful for seeding host-side CSPRNGs or verifying the TRNG is accessible.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_generate_random(64 bytes)"]
+    D --> E{"Status == STSE_OK?"}
+    E -- Yes --> F["Print Random Bytes & Success"]
+    E -- No --> G["Error / Halt"]
+```
+
 ## Architecture
 
 ```
@@ -17,7 +29,7 @@ Demonstrates the True Random Number Generator (TRNG) embedded in the STSAFE-A120
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 at I²C address 0x20 |
 | Runtime | `se-daemon` running on target, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

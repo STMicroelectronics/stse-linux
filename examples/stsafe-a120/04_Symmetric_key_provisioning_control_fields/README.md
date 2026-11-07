@@ -9,6 +9,18 @@ The example:
 2. Writes a test AES-256 key and the desired control field configuration.
 3. Reads back the control fields to confirm the write succeeded.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stsafea_put_symmetric_key_slot_provisioning_ctrl_fields()"]
+    D --> E{"Status == STSE_OK?"}
+    E -- Yes --> F["Control Fields Provisioned"]
+    E -- No --> G["Error / Halt"]
+```
+
 ## Architecture
 
 ```
@@ -23,7 +35,7 @@ The example:
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with at least one symmetric key slot in writable state |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

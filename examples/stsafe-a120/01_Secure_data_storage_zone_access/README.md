@@ -10,6 +10,21 @@ Demonstrates reading from and writing to a STSAFE-A120 secure data zone.  The ex
 
 This serves as a reference for any application that needs to store secrets, certificates, or configuration data in the device's non-volatile memory with access control.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_data_storage_read_data_zone(Initial)"]
+    D --> E["stsafea_generate_random(New Data)"]
+    E --> F["stse_data_storage_update_data_zone(Write)"]
+    F --> G["stse_data_storage_read_data_zone(Readback)"]
+    G --> H{"Readback Matches New Data?"}
+    H -- Yes --> I["Success"]
+    H -- No --> J["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -22,7 +37,7 @@ This serves as a reference for any application that needs to store secrets, cert
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with at least one writable data zone |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

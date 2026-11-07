@@ -69,8 +69,12 @@
 /**
  * @brief Custom OSSL_PARAM key: I²C device address (uint32_t).
  *        7-bit I²C address of the secure element on the selected bus.
- *        Default if not supplied: 0x20 for STSAFE-A120, 0x0C for STSAFE-L010.
+ *        Default if not supplied: 0x20 for STSAFE-A110/A120, 0x0C for STSAFE-L010.
  */
 #define STSE_PROV_PARAM_DEVADDR "stse-devaddr"
+
+#ifndef OSSL_DISPATCH_END
+#define OSSL_DISPATCH_END { 0, NULL }
+#endif
 
 #endif /* STSE_PROVIDER_H */

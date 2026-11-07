@@ -1,4 +1,3 @@
-
 # STSAFE-L Accessory authentication
 
 This project illustrates how to use the STSAFE-L Secure Element and STMicroelectronics Secure Element Library to perform device/accessory authentication.<br>
@@ -20,14 +19,16 @@ sequenceDiagram
     deactivate AUTH
 ```
 
-The example applicative flowchart is illustrated below :
+## Applicative Flowchart
 
 ```mermaid
 flowchart TD
-    A["MAIN"] --> B["Initialize Apps terminal \n(baudrate = 115200)"]
-    B --> C["Print example title and instructions"]
-    C --> D["Initialize STSE Handler"]
-    D --> E["Device Authenticate API"]
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_device_authenticate()"]
+    D --> E{"Authentication OK?"}
+    E -- Yes --> F["Success"]
+    E -- No --> G["Error / Halt"]
 ```
 
 STSELib API used in the example are the following :

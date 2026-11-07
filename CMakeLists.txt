@@ -3,42 +3,54 @@
 # ******************************************************************************
 #
 # Supported devices:
-#   STSAFE-A120  (NIST/Brainpool ECDSA sign + verify — provider: stsafea.so)
-#   STSAFE-L010  (Ed25519 sign in HW, verify in SW — provider: stsafel.so)
+#   STSAFE-A120  (NIST/Brainpool ECDSA sign + verify — provider: stsafe-a120.so)
+#   STSAFE-A110  (NIST/Brainpool ECDSA sign + verify — provider: stsafe-a110.so)
+#   STSAFE-L010  (Ed25519 sign in HW, verify in SW — provider: stsafe-l010.so)
 #
 # ──────────────────────────────────────────────────────────────────────────────
-# Three build configurations
+# Build configurations
 # ──────────────────────────────────────────────────────────────────────────────
 #
 #   ① STSAFE-A120 only
-#       cmake -B build/stsafe-a \
-#             [-DCMAKE_TOOLCHAIN_FILE=cmake/stm32mp1-toolchain.cmake] \
-#             -DTARGET_DEVICE=STSAFE_A \
+#       cmake -B build/stsafe-a120 \
+#             [-DCMAKE_TOOLCHAIN_FILE=cmake/stm32mp1-toolchain.cmake | cmake/rpi-toolchain.cmake] \
+#             -DTARGET_DEVICE=STSAFE_A120 \
 #             -DDEPLOY_TARGET=root@<board-ip>
-#       cmake --build build/stsafe-a
-#       cmake --build build/stsafe-a --target deploy
+#       cmake --build build/stsafe-a120
+#       cmake --build build/stsafe-a120 --target deploy
 #
-#   ② STSAFE-L010 only
-#       cmake -B build/stsafe-l \
-#             [-DCMAKE_TOOLCHAIN_FILE=cmake/stm32mp1-toolchain.cmake] \
-#             -DTARGET_DEVICE=STSAFE_L \
+#   ② STSAFE-A110 only
+#       cmake -B build/stsafe-a110 \
+#             [-DCMAKE_TOOLCHAIN_FILE=cmake/stm32mp1-toolchain.cmake | cmake/rpi-toolchain.cmake] \
+#             -DTARGET_DEVICE=STSAFE_A110 \
 #             -DDEPLOY_TARGET=root@<board-ip>
-#       cmake --build build/stsafe-l
-#       cmake --build build/stsafe-l --target deploy
+#       cmake --build build/stsafe-a110
+#       cmake --build build/stsafe-a110 --target deploy
 #
-#   ③ Both devices (TARGET_DEVICE=ALL, the default)
+#   ③ STSAFE-L010 only
+#       cmake -B build/stsafe-l010 \
+#             [-DCMAKE_TOOLCHAIN_FILE=cmake/stm32mp1-toolchain.cmake | cmake/rpi-toolchain.cmake] \
+#             -DTARGET_DEVICE=STSAFE_L010 \
+#             -DDEPLOY_TARGET=root@<board-ip>
+#       cmake --build build/stsafe-l010
+#       cmake --build build/stsafe-l010 --target deploy
+#
+#   ④ All devices (TARGET_DEVICE=ALL, the default)
 #       cmake -B build/all \
-#             [-DCMAKE_TOOLCHAIN_FILE=cmake/stm32mp1-toolchain.cmake] \
+#             [-DCMAKE_TOOLCHAIN_FILE=cmake/stm32mp1-toolchain.cmake | cmake/rpi-toolchain.cmake] \
 #             -DDEPLOY_TARGET=root@<board-ip>
 #       cmake --build build/all
 #       cmake --build build/all --target deploy
 #
+#       (Note: omit CMAKE_TOOLCHAIN_FILE for native builds on Raspberry Pi or Linux host)
+#
 #       In ALL mode, per-device example binaries land in sub-directories to
-#       avoid name collisions (both products share example names like
+#       avoid name collisions (products share example names like
 #       "01_Echo_loop"):
-#           build/all/stsafe-a/<binary>   ← STSAFE-A120 examples
-#           build/all/stsafe-l/<binary>   ← STSAFE-L010 examples
-#           build/all/<daemon|lib|*.so>   ← shared infrastructure
+#           build/all/stsafe-a120/<binary>   ← STSAFE-A120 examples
+#           build/all/stsafe-a110/<binary>   ← STSAFE-A110 examples
+#           build/all/stsafe-l010/<binary>   ← STSAFE-L010 examples
+#           build/all/<daemon|lib|*.so>      ← shared infrastructure
 #
 # ******************************************************************************
 
@@ -55,20 +67,20 @@ privilege-separated I2C daemon, shared library, and OpenSSL 3.x providers"
 # ============================================================================
 # Options
 # ============================================================================
-option(BUILD_EXAMPLES  "Build all example programs"                              ON)
-option(BUILD_PROVIDER  "Build OpenSSL 3.x providers (stsafea.so, stsafel.so)"  ON)
-option(ENABLE_GTK_DEMO "Build 06_GTK_Authentication_Demo (requires gtk+-3.0)"   ON)
+option(BUILD_EXAMPLES  "Build all example programs"                                             ON)
+option(BUILD_PROVIDER  "Build OpenSSL 3.x providers (stsafe-a120.so, stsafe-a110.so, stsafe-l010.so)" ON)
+option(ENABLE_GTK_DEMO "Build 06_GTK_Authentication_Demo (requires gtk+-3.0)"                  ON)
 
 set(TARGET_DEVICE "ALL"
-    CACHE STRING "Device profile: ALL | STSAFE_A (A120 only) | STSAFE_L (L010 only)")
-set_property(CACHE TARGET_DEVICE PROPERTY STRINGS ALL STSAFE_A STSAFE_L)
+    CACHE STRING "Device profile: ALL | STSAFE_A120 | STSAFE_A110 | STSAFE_L010")
+set_property(CACHE TARGET_DEVICE PROPERTY STRINGS ALL STSAFE_A120 STSAFE_A110 STSAFE_L010 STSAFE_A STSAFE_L)
 
 set(DEPLOY_TARGET "root@stm32mp1"
     CACHE STRING "SSH destination for the 'deploy' custom target (user@host or user@ip)")
 
 set(DEPLOY_EXAMPLES_DIR "/home/root/stse-linux"
     CACHE PATH
-    "Remote base directory for deployed examples (stsafe-a/ and stsafe-l/ sub-dirs are created automatically)")
+    "Remote base directory for deployed examples (stsafe-a120/, stsafe-a110/, and stsafe-l010/ sub-dirs are created automatically)")
 
 set(OPENSSL_MODULES_INSTALL_DIR ""
     CACHE PATH
@@ -77,39 +89,51 @@ set(OPENSSL_MODULES_INSTALL_DIR ""
 # ============================================================================
 # Resolve device build flags
 # ============================================================================
-if(TARGET_DEVICE STREQUAL "STSAFE_A" OR TARGET_DEVICE STREQUAL "ALL")
-    set(BUILD_STSAFEA TRUE)
+if(TARGET_DEVICE STREQUAL "STSAFE_A120" OR TARGET_DEVICE STREQUAL "STSAFE_A" OR TARGET_DEVICE STREQUAL "ALL")
+    set(BUILD_STSAFEA120 TRUE)
 else()
-    set(BUILD_STSAFEA FALSE)
+    set(BUILD_STSAFEA120 FALSE)
 endif()
 
-if(TARGET_DEVICE STREQUAL "STSAFE_L" OR TARGET_DEVICE STREQUAL "ALL")
-    set(BUILD_STSAFEL TRUE)
+if(TARGET_DEVICE STREQUAL "STSAFE_A110" OR TARGET_DEVICE STREQUAL "ALL")
+    set(BUILD_STSAFEA110 TRUE)
 else()
-    set(BUILD_STSAFEL FALSE)
+    set(BUILD_STSAFEA110 FALSE)
 endif()
 
-if(NOT BUILD_STSAFEA AND NOT BUILD_STSAFEL)
+if(TARGET_DEVICE STREQUAL "STSAFE_L010" OR TARGET_DEVICE STREQUAL "STSAFE_L" OR TARGET_DEVICE STREQUAL "ALL")
+    set(BUILD_STSAFEL010 TRUE)
+else()
+    set(BUILD_STSAFEL010 FALSE)
+endif()
+
+# Backward compatibility alias
+set(BUILD_STSAFEA ${BUILD_STSAFEA120})
+set(BUILD_STSAFEL ${BUILD_STSAFEL010})
+
+if(NOT BUILD_STSAFEA120 AND NOT BUILD_STSAFEA110 AND NOT BUILD_STSAFEL010)
     message(FATAL_ERROR
         "TARGET_DEVICE '${TARGET_DEVICE}' is not recognised.\n"
-        "Valid values: ALL  STSAFE_A  STSAFE_L\n")
+        "Valid values: ALL  STSAFE_A120  STSAFE_A110  STSAFE_L010\n")
 endif()
 
 # ============================================================================
 # Per-device binary output directories
 #
-# In ALL mode A120 and L010 examples share names (e.g. 01_Echo_loop).
-# CMake target names keep the 'l010_' prefix for uniqueness; OUTPUT_NAME
+# In ALL mode examples share names (e.g. 01_Echo_loop).
+# CMake target names keep prefixes for uniqueness; OUTPUT_NAME
 # strips it so the on-disk binary has no prefix.  Binaries land in
 # device-specific subdirectories inside CMAKE_BINARY_DIR.
 #
 # In single-device mode all output lands directly in CMAKE_BINARY_DIR.
 # ============================================================================
 if(TARGET_DEVICE STREQUAL "ALL")
-    set(A120_BIN_DIR "${CMAKE_BINARY_DIR}/stsafe-a")
-    set(L010_BIN_DIR "${CMAKE_BINARY_DIR}/stsafe-l")
+    set(A120_BIN_DIR "${CMAKE_BINARY_DIR}/stsafe-a120")
+    set(A110_BIN_DIR "${CMAKE_BINARY_DIR}/stsafe-a110")
+    set(L010_BIN_DIR "${CMAKE_BINARY_DIR}/stsafe-l010")
 else()
     set(A120_BIN_DIR "${CMAKE_BINARY_DIR}")
+    set(A110_BIN_DIR "${CMAKE_BINARY_DIR}")
     set(L010_BIN_DIR "${CMAKE_BINARY_DIR}")
 endif()
 
@@ -143,12 +167,30 @@ set(STSE_A120_STRUCTURED_EXAMPLES
     05_Symmetric_key_provisioning_wrapped_encrypt_AES-256_CCM
 )
 
+# STSAFE-A110: structured examples
+set(STSE_A110_STRUCTURED_EXAMPLES
+    01_Echo_loop
+    01_Random_number
+    01_Device_authentication
+    01_Device_authentication_multi_steps
+    01_Key_pair_generation_NIST_P256
+    01_Key_pair_generation_NIST_P384
+    01_Secure_data_storage_zone_access
+    01_Secure_data_storage_counter_access
+    02_Host_key_provisioning
+    03_ECDH
+)
+
 # Full A120 binary name list (expanded further if GTK is found)
 set(_a120_all_bin_names
-    stse_echo_example
-    stse_sign_example
     ${STSE_A120_STRUCTURED_EXAMPLES}
     02_OpenSSL_ecdsa_sign_verify
+)
+
+# Full A110 binary name list (expanded further if GTK is found)
+set(_a110_all_bin_names
+    ${STSE_A110_STRUCTURED_EXAMPLES}
+    a110_02_OpenSSL_ecdsa_sign_verify
 )
 
 # STSAFE-L010: binary output names (no prefix) and CMake target names (l010_
@@ -313,11 +355,6 @@ if(BUILD_EXAMPLES)
                 RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
         endfunction()
 
-        stse_add_example(stse_echo_example
-            examples/stsafe-a120/stse_echo_example.c FALSE)
-        stse_add_example(stse_sign_example
-            examples/stsafe-a120/stse_sign_example.c FALSE)
-
         foreach(ex IN LISTS STSE_A120_STRUCTURED_EXAMPLES)
             set(_src "${CMAKE_CURRENT_SOURCE_DIR}/examples/stsafe-a120/${ex}/main.c")
             if(EXISTS "${_src}")
@@ -357,7 +394,56 @@ if(BUILD_EXAMPLES)
             endif()
         endif()
 
-    endif() # BUILD_STSAFEA
+    endif() # BUILD_STSAFEA120
+
+    # ── STSAFE-A110 examples ──────────────────────────────────────────────
+    if(BUILD_STSAFEA110)
+
+        add_library(apps_utils_a110 OBJECT
+            examples/stsafe-a110/apps_utils/Apps_utils.c)
+        target_include_directories(apps_utils_a110 PUBLIC
+            ${STSE_COMMON_INCLUDES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/examples/stsafe-a110/apps_utils")
+        target_compile_options(apps_utils_a110 PRIVATE ${STSE_SHORT_ENUM_FLAG})
+
+        function(stsea110_add_example target_name output_name src_file use_apps_utils)
+            if(use_apps_utils)
+                add_executable(${target_name} "${src_file}"
+                    $<TARGET_OBJECTS:apps_utils_a110>)
+            else()
+                add_executable(${target_name} "${src_file}")
+            endif()
+            target_include_directories(${target_name} PRIVATE
+                ${STSE_COMMON_INCLUDES}
+                "${CMAKE_CURRENT_SOURCE_DIR}/providers"
+                "${CMAKE_CURRENT_SOURCE_DIR}/examples/stsafe-a110/apps_utils")
+            target_link_libraries(${target_name} PRIVATE
+                stse OpenSSL::SSL OpenSSL::Crypto)
+            target_compile_options(${target_name} PRIVATE ${STSE_SHORT_ENUM_FLAG})
+            set_target_properties(${target_name} PROPERTIES
+                OUTPUT_NAME              "${output_name}"
+                RUNTIME_OUTPUT_DIRECTORY "${A110_BIN_DIR}"
+                BUILD_RPATH              "${EXAMPLE_BUILD_RPATH}"
+                INSTALL_RPATH            "${EXAMPLE_INSTALL_RPATH}")
+            install(TARGETS ${target_name}
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        endfunction()
+
+
+        foreach(ex IN LISTS STSE_A110_STRUCTURED_EXAMPLES)
+            set(_src "${CMAKE_CURRENT_SOURCE_DIR}/examples/stsafe-a110/${ex}/main.c")
+            if(EXISTS "${_src}")
+                stsea110_add_example(a110_${ex} "${ex}" "${_src}" TRUE)
+            else()
+                message(WARNING "A110 example source not found, skipping: ${_src}")
+            endif()
+        endforeach()
+
+        # Provider demo for A110: ECDSA sign + hardware verify
+        stsea110_add_example(a110_02_OpenSSL_ecdsa_sign_verify "02_OpenSSL_ecdsa_sign_verify"
+            "examples/stsafe-a110/02_OpenSSL_ecdsa_sign_verify/main.c" FALSE)
+
+    endif() # BUILD_STSAFEA110
 
     # ── STSAFE-L010 examples ──────────────────────────────────────────────
     if(BUILD_STSAFEL)
@@ -442,12 +528,12 @@ message(STATUS "[stse] Provider install directory: ${STSE_PROV_DEST}")
 # ============================================================================
 if(BUILD_PROVIDER)
 
-    # ── stsafea.so — STSAFE-A120 (NIST/Brainpool ECDSA, hardware sign+verify)
-    if(BUILD_STSAFEA)
+    # ── stsafe-a120.so — STSAFE-A120 (NIST/Brainpool ECDSA, hardware sign+verify)
+    if(BUILD_STSAFEA120)
 
-        add_library(stsafea_provider MODULE providers/stsafea_provider.c)
+        add_library(stsafea_provider MODULE providers/stsafe-a120_provider.c)
         set_target_properties(stsafea_provider PROPERTIES
-            OUTPUT_NAME stsafea PREFIX "" SUFFIX ".so"
+            OUTPUT_NAME "stsafe-a120" PREFIX "" SUFFIX ".so"
             BUILD_RPATH   "${CMAKE_BINARY_DIR}"
             INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
         target_include_directories(stsafea_provider PRIVATE
@@ -471,14 +557,32 @@ if(BUILD_PROVIDER)
         install(TARGETS 02_OpenSSL_ecdsa_sign_verify
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
-    endif() # BUILD_STSAFEA
+    endif() # BUILD_STSAFEA120
 
-    # ── stsafel.so — STSAFE-L010 (Ed25519 hardware sign, software verify)
-    if(BUILD_STSAFEL)
+    # ── stsafe-a110.so — STSAFE-A110 (NIST/Brainpool 256/384 ECDSA, hardware sign+verify)
+    if(BUILD_STSAFEA110)
 
-        add_library(stsafel_provider MODULE providers/stsafel_provider.c)
+        add_library(stsafea110_provider MODULE providers/stsafe-a110_provider.c)
+        set_target_properties(stsafea110_provider PROPERTIES
+            OUTPUT_NAME "stsafe-a110" PREFIX "" SUFFIX ".so"
+            BUILD_RPATH   "${CMAKE_BINARY_DIR}"
+            INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
+        target_include_directories(stsafea110_provider PRIVATE
+            ${STSE_COMMON_INCLUDES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/providers")
+        target_compile_options(stsafea110_provider PRIVATE ${STSE_SHORT_ENUM_FLAG})
+        target_link_libraries(stsafea110_provider PRIVATE
+            stse OpenSSL::SSL OpenSSL::Crypto)
+        install(TARGETS stsafea110_provider LIBRARY DESTINATION "${STSE_PROV_DEST}")
+
+    endif() # BUILD_STSAFEA110
+
+    # ── stsafe-l010.so — STSAFE-L010 (Ed25519 hardware sign, software verify)
+    if(BUILD_STSAFEL010)
+
+        add_library(stsafel_provider MODULE providers/stsafe-l010_provider.c)
         set_target_properties(stsafel_provider PROPERTIES
-            OUTPUT_NAME stsafel PREFIX "" SUFFIX ".so"
+            OUTPUT_NAME "stsafe-l010" PREFIX "" SUFFIX ".so"
             BUILD_RPATH   "${CMAKE_BINARY_DIR}"
             INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
         target_include_directories(stsafel_provider PRIVATE
@@ -534,7 +638,7 @@ _dcmd(ssh "${DEPLOY_TARGET}" "systemctl stop se-daemon 2>/dev/null || true")
 
 # Create all required remote directories up front
 _dcmd(ssh "${DEPLOY_TARGET}"
-    "mkdir -p '${_prefix}/sbin' '${_prefix}/lib' '/etc/systemd/system' '${DEPLOY_EXAMPLES_DIR}/stsafe-a' '${DEPLOY_EXAMPLES_DIR}/stsafe-l'")
+    "mkdir -p '${_prefix}/sbin' '${_prefix}/lib' '/etc/systemd/system' '${DEPLOY_EXAMPLES_DIR}/stsafe-a120' '${DEPLOY_EXAMPLES_DIR}/stsafe-a110' '${DEPLOY_EXAMPLES_DIR}/stsafe-l010'")
 
 # se-daemon (atomic swap to avoid partial writes)
 _dcmd(sh -c
@@ -559,27 +663,28 @@ _dcmd(sh -c
       chmod 0644 /etc/systemd/system/se-daemon.service'")
 
 # ── STSAFE-A120 — provider + examples ────────────────────────────────────────
-if(BUILD_STSAFEA AND BUILD_PROVIDER)
+if(BUILD_STSAFEA120)
 
-    list(APPEND _deploy_deps stsafea_provider)
-    if(TARGET 02_OpenSSL_ecdsa_sign_verify)
-        list(APPEND _deploy_deps 02_OpenSSL_ecdsa_sign_verify)
+    if(BUILD_PROVIDER)
+        list(APPEND _deploy_deps stsafea_provider)
+        if(TARGET 02_OpenSSL_ecdsa_sign_verify)
+            list(APPEND _deploy_deps 02_OpenSSL_ecdsa_sign_verify)
+        endif()
+
+        # Deploy stsafe-a120.so provider
+        _dcmd(ssh "${DEPLOY_TARGET}" "mkdir -p '${STSE_PROV_DEST}'")
+        _dcmd(sh -c
+            "cat '${CMAKE_BINARY_DIR}/stsafe-a120.so' | ssh '${DEPLOY_TARGET}' \
+             'cat > ${STSE_PROV_DEST}/stsafe-a120.so && chmod 0755 ${STSE_PROV_DEST}/stsafe-a120.so'")
     endif()
 
     # Add A120 example targets that were actually created
-    foreach(_t stse_echo_example stse_sign_example
-                ${STSE_A120_STRUCTURED_EXAMPLES}
+    foreach(_t ${STSE_A120_STRUCTURED_EXAMPLES}
                 06_GTK_Authentication_Demo)
         if(TARGET "${_t}")
             list(APPEND _deploy_deps "${_t}")
         endif()
     endforeach()
-
-    # Deploy stsafea.so provider
-    _dcmd(ssh "${DEPLOY_TARGET}" "mkdir -p '${STSE_PROV_DEST}'")
-    _dcmd(sh -c
-        "cat '${CMAKE_BINARY_DIR}/stsafea.so' | ssh '${DEPLOY_TARGET}' \
-         'cat > ${STSE_PROV_DEST}/stsafea.so && chmod 0755 ${STSE_PROV_DEST}/stsafea.so'")
 
     # Compute the list of A120 binaries that were actually built
     set(_a120_deploy_bins "")
@@ -595,29 +700,81 @@ if(BUILD_STSAFEA AND BUILD_PROVIDER)
         _dcmd(sh -c
             "(cd '${A120_BIN_DIR}' && tar -cf - ${_a120_tar_list} 2>/dev/null) | \
              ssh '${DEPLOY_TARGET}' \
-             \"mkdir -p '${DEPLOY_EXAMPLES_DIR}/stsafe-a' && \
-               tar -xf - -C '${DEPLOY_EXAMPLES_DIR}/stsafe-a' && \
-               chmod 0755 '${DEPLOY_EXAMPLES_DIR}/stsafe-a/'*\"")
+             \"mkdir -p '${DEPLOY_EXAMPLES_DIR}/stsafe-a120' && \
+               tar -xf - -C '${DEPLOY_EXAMPLES_DIR}/stsafe-a120' && \
+               chmod 0755 '${DEPLOY_EXAMPLES_DIR}/stsafe-a120/'*\"")
+    endif()
+
+endif()
+
+# ── STSAFE-A110 — provider + examples ────────────────────────────────────────
+if(BUILD_STSAFEA110)
+
+    if(BUILD_PROVIDER)
+        list(APPEND _deploy_deps stsafea110_provider)
+        if(TARGET a110_02_OpenSSL_ecdsa_sign_verify)
+            list(APPEND _deploy_deps a110_02_OpenSSL_ecdsa_sign_verify)
+        endif()
+
+        # Deploy stsafe-a110.so provider
+        _dcmd(ssh "${DEPLOY_TARGET}" "mkdir -p '${STSE_PROV_DEST}'")
+        _dcmd(sh -c
+            "cat '${CMAKE_BINARY_DIR}/stsafe-a110.so' | ssh '${DEPLOY_TARGET}' \
+             'cat > ${STSE_PROV_DEST}/stsafe-a110.so && chmod 0755 ${STSE_PROV_DEST}/stsafe-a110.so'")
+    endif()
+
+    # Compute the list of A110 binaries that were actually built
+    set(_a110_deploy_bins "")
+    foreach(_ex IN LISTS STSE_A110_STRUCTURED_EXAMPLES)
+        if(TARGET "a110_${_ex}")
+            list(APPEND _a110_deploy_bins "${_ex}")
+            list(APPEND _deploy_deps "a110_${_ex}")
+        endif()
+    endforeach()
+    if(TARGET a110_02_OpenSSL_ecdsa_sign_verify)
+        list(APPEND _a110_deploy_bins "02_OpenSSL_ecdsa_sign_verify")
+        list(APPEND _deploy_deps a110_02_OpenSSL_ecdsa_sign_verify)
+    endif()
+    if(TARGET a110_06_GTK_Authentication_Demo)
+        list(APPEND _a110_deploy_bins "06_GTK_Authentication_Demo")
+        list(APPEND _deploy_deps a110_06_GTK_Authentication_Demo)
+    endif()
+
+    if(_a110_deploy_bins)
+        string(JOIN " " _a110_tar_list ${_a110_deploy_bins})
+        # Transfer via tar (single SSH connection)
+        _dcmd(sh -c
+            "(cd '${A110_BIN_DIR}' && tar -cf - ${_a110_tar_list} 2>/dev/null) | \
+             ssh '${DEPLOY_TARGET}' \
+             \"mkdir -p '${DEPLOY_EXAMPLES_DIR}/stsafe-a110' && \
+               tar -xf - -C '${DEPLOY_EXAMPLES_DIR}/stsafe-a110' && \
+               chmod 0755 '${DEPLOY_EXAMPLES_DIR}/stsafe-a110/'*\"")
     endif()
 
 endif()
 
 # ── STSAFE-L010 — provider + examples ────────────────────────────────────────
-if(BUILD_STSAFEL AND BUILD_PROVIDER)
+if(BUILD_STSAFEL010)
 
-    list(APPEND _deploy_deps stsafel_provider)
+    if(BUILD_PROVIDER)
+        list(APPEND _deploy_deps stsafel_provider)
+        if(TARGET l010_02_OpenSSL_eddsa_sign)
+            list(APPEND _deploy_deps l010_02_OpenSSL_eddsa_sign)
+        endif()
+
+        # Deploy stsafe-l010.so provider
+        _dcmd(ssh "${DEPLOY_TARGET}" "mkdir -p '${STSE_PROV_DEST}'")
+        _dcmd(sh -c
+            "cat '${CMAKE_BINARY_DIR}/stsafe-l010.so' | ssh '${DEPLOY_TARGET}' \
+             'cat > ${STSE_PROV_DEST}/stsafe-l010.so && chmod 0755 ${STSE_PROV_DEST}/stsafe-l010.so'")
+    endif()
+
     # Add L010 targets that were actually created
     foreach(_t IN LISTS STSE_L010_EXAMPLE_TARGETS)
         if(TARGET "${_t}")
             list(APPEND _deploy_deps "${_t}")
         endif()
     endforeach()
-
-    # Deploy stsafel.so provider
-    _dcmd(ssh "${DEPLOY_TARGET}" "mkdir -p '${STSE_PROV_DEST}'")
-    _dcmd(sh -c
-        "cat '${CMAKE_BINARY_DIR}/stsafel.so' | ssh '${DEPLOY_TARGET}' \
-         'cat > ${STSE_PROV_DEST}/stsafel.so && chmod 0755 ${STSE_PROV_DEST}/stsafel.so'")
 
     # Compute list of L010 binary output names for built targets
     set(_l010_deploy_bins "")
@@ -637,9 +794,9 @@ if(BUILD_STSAFEL AND BUILD_PROVIDER)
         _dcmd(sh -c
             "(cd '${L010_BIN_DIR}' && tar -cf - ${_l010_tar_list} 2>/dev/null) | \
              ssh '${DEPLOY_TARGET}' \
-             \"mkdir -p '${DEPLOY_EXAMPLES_DIR}/stsafe-l' && \
-               tar -xf - -C '${DEPLOY_EXAMPLES_DIR}/stsafe-l' && \
-               chmod 0755 '${DEPLOY_EXAMPLES_DIR}/stsafe-l/'*\"")
+             \"mkdir -p '${DEPLOY_EXAMPLES_DIR}/stsafe-l010' && \
+               tar -xf - -C '${DEPLOY_EXAMPLES_DIR}/stsafe-l010' && \
+               chmod 0755 '${DEPLOY_EXAMPLES_DIR}/stsafe-l010/'*\"")
     endif()
 
 endif()
@@ -676,9 +833,10 @@ if(BUILD_PROVIDER)
     message(STATUS "  Provider dir     : ${STSE_PROV_DEST}")
 endif()
 message(STATUS "  Deploy target    : ${DEPLOY_TARGET}")
-message(STATUS "  Deploy examples  : ${DEPLOY_EXAMPLES_DIR}/stsafe-{a,l}/")
+message(STATUS "  Deploy examples  : ${DEPLOY_EXAMPLES_DIR}/stsafe-{a120,a110,l010}/")
 if(TARGET_DEVICE STREQUAL "ALL")
     message(STATUS "  A120 bin dir     : ${A120_BIN_DIR}")
+    message(STATUS "  A110 bin dir     : ${A110_BIN_DIR}")
     message(STATUS "  L010 bin dir     : ${L010_BIN_DIR}")
 endif()
 message(STATUS "=========================================")

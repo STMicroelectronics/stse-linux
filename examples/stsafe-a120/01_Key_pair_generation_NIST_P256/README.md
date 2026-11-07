@@ -4,6 +4,21 @@
 
 Generates a NIST P-256 (secp256r1) Elliptic Curve key pair on the STSAFE-A120 hardware using `stse_generate_ecc_key_pair`.  The private key never leaves the secure element.  The example retrieves and prints the public key coordinates (X, Y) and can be used as a starting point for ECDH or signing workflows.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_generate_ecc_key_pair(NIST P-256)"]
+    D --> E["Generate Random Challenge"]
+    E --> F["stse_ecc_generate_signature(Challenge)"]
+    F --> G["stse_ecc_verify_signature(Challenge)"]
+    G --> H{"Signature Verified?"}
+    H -- Yes --> I["Keypair Generation & Verification Success"]
+    H -- No --> J["Verification Failed"]
+```
+
 ## Architecture
 
 ```
@@ -16,7 +31,7 @@ Generates a NIST P-256 (secp256r1) Elliptic Curve key pair on the STSAFE-A120 ha
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with at least one writable generic key slot |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

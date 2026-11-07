@@ -11,6 +11,22 @@ Combines **wrapped key provisioning** and **AES-256-CCM authenticated encryption
 
 This is the production-safe provisioning path for encryption keys.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_write_symmetric_key_wrapped(Wrapped AES-256)"]
+    D --> E["stsafea_open_host_session()"]
+    E --> F["stse_aes_ccm_encrypt(HW Plaintext Encrypt)"]
+    F --> G["stse_aes_ccm_decrypt(HW Ciphertext Decrypt)"]
+    G --> H["stsafea_close_host_session()"]
+    H --> I{"Decrypted == Original Plaintext?"}
+    I -- Yes --> J["Wrapped Provisioning & CCM Success"]
+    I -- No --> K["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -25,7 +41,7 @@ This is the production-safe provisioning path for encryption keys.
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a KEK in slot 0 and a writable target slot |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

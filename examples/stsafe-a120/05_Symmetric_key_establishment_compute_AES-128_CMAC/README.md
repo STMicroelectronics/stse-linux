@@ -11,6 +11,22 @@ Demonstrates the AES-128 CMAC (Cipher-based Message Authentication Code) operati
 
 This demonstrates how the STSAFE-A120 can be used for **message authentication** in symmetric-key protocols (e.g., IoT sensor data integrity).
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_establish_symmetric_key(AES-128)"]
+    D --> E["stsafea_open_host_session()"]
+    E --> F["stse_cmac_hmac_compute(HW AES-128 CMAC)"]
+    F --> G["stse_cmac_hmac_verify(HW Tag Verify)"]
+    G --> H["stsafea_close_host_session()"]
+    H --> I{"Tag Verified?"}
+    I -- Yes --> J["AES-128 CMAC Success"]
+    I -- No --> K["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -23,7 +39,7 @@ This demonstrates how the STSAFE-A120 can be used for **message authentication**
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with symmetric key slot 0 loaded with a known AES-128 key |
 | Runtime | `se-daemon` running, `libstse.so` installed, OpenSSL 3.x |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

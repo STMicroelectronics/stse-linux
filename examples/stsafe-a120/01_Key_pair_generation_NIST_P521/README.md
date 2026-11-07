@@ -4,6 +4,21 @@
 
 Generates a NIST P-521 (secp521r1) Elliptic Curve key pair on the STSAFE-A120 hardware.  P-521 provides 260-bit security strength.  The private key is stored securely inside the device; the public key (X, Y — 66 bytes each) is returned and printed.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_generate_ecc_key_pair(NIST P-521)"]
+    D --> E["Generate Random Challenge"]
+    E --> F["stse_ecc_generate_signature(Challenge)"]
+    F --> G["stse_ecc_verify_signature(Challenge)"]
+    G --> H{"Signature Verified?"}
+    H -- Yes --> I["Keypair Generation & Verification Success"]
+    H -- No --> J["Verification Failed"]
+```
+
 ## Architecture
 
 ```
@@ -16,7 +31,7 @@ Generates a NIST P-521 (secp521r1) Elliptic Curve key pair on the STSAFE-A120 ha
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a writable generic key slot supporting P-521 |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

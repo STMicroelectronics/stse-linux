@@ -13,6 +13,26 @@ Extended variant of `01_Device_authentication` that performs device authenticati
 
 This step-by-step approach is suited for educational use and for integrating individual stages into larger application flows (e.g., network-based authentication protocols).
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_certificate_parse(Root CA)"]
+    D --> E["stse_get_device_certificate_size()"]
+    E --> F["stse_get_device_certificate()"]
+    F --> G["stse_certificate_parse(Device Cert)"]
+    G --> H["stse_certificate_is_parent()"]
+    H --> I["stse_certificate_verify_signature(Device Cert)"]
+    I --> J["Generate Random Challenge Nonce"]
+    J --> K["stse_ecc_generate_signature(Challenge)"]
+    K --> L["stse_certificate_verify_signature(Challenge Sig)"]
+    L --> M{"Signature Verified?"}
+    M -- Yes --> N["Authentication Success"]
+    M -- No --> O["Authentication Failed"]
+```
+
 ## Architecture
 
 ```
@@ -25,7 +45,7 @@ This step-by-step approach is suited for educational use and for integrating ind
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 SPL05 with ST Production CA certificate in zone 0 |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

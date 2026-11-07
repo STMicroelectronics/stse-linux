@@ -12,6 +12,24 @@ Demonstrates Elliptic Curve Diffie-Hellman (ECDH) key agreement using the STSAFE
 
 The private key never leaves the secure element, making this the recommended approach for TLS session key establishment or any protocol requiring forward secrecy.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stsafea_perso_info_get_cmd_AC()"]
+    D --> E["stsafea_generate_ecc_key_pair(Ephemeral HW Key)"]
+    E --> F["Generate Host Peer Keypair (OpenSSL)"]
+    F --> G["stsafea_open_host_session()"]
+    G --> H["stse_ecc_establish_shared_secret(HW ECDH)"]
+    H --> I["stsafea_close_host_session()"]
+    I --> J["Compute Peer Shared Secret (OpenSSL SW)"]
+    J --> K{"Secrets Match?"}
+    K -- Yes --> L["ECDH Key Agreement Success"]
+    K -- No --> M["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -25,7 +43,7 @@ The private key never leaves the secure element, making this the recommended app
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a writable ECDH-capable key slot |
 | Runtime | `se-daemon` running, `libstse.so` installed, OpenSSL 3.x |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

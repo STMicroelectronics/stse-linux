@@ -1,6 +1,6 @@
 /**
  * *****************************************************************************
- * @file    stsafel_provider.c
+ * @file    stsafe-l010_provider.c
  * @brief   STSAFE-L010 OpenSSL 3.x Provider
  * *****************************************************************************
  *           COPYRIGHT 2026 STMicroelectronics
@@ -26,7 +26,7 @@
 
 /* =========================================================================
  * NOTE: stsafel.so links directly against libstse.so — no dlopen/dlsym.
- * =========================================================================
+ * ========================================================================= */
 
 /* =========================================================================
  * Provider context — one per OSSL_PROVIDER_load() call
@@ -675,7 +675,7 @@ static const OSSL_DISPATCH stsafel_eddsa_functions[] = {
 static const OSSL_ALGORITHM stsafel_keymgmt_algs[] = {
     {
         "ED25519:1.3.101.112",
-        "provider=stsafel",
+        "provider=stsafe-l010",
         stsafel_ed_keymgmt_functions,
         "STSAFE-L010 hardware-backed Ed25519 key management"
     },
@@ -685,7 +685,7 @@ static const OSSL_ALGORITHM stsafel_keymgmt_algs[] = {
 static const OSSL_ALGORITHM stsafel_signature_algs[] = {
     {
         "ED25519:1.3.101.112",
-        "provider=stsafel",
+        "provider=stsafe-l010",
         stsafel_eddsa_functions,
         "STSAFE-L010 hardware Ed25519 signature"
     },
@@ -728,7 +728,7 @@ static int stse_prov_get_params(void *vprovctx, OSSL_PARAM params[])
     OSSL_PARAM *p;
 
     p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_NAME);
-    if (p && !OSSL_PARAM_set_utf8_ptr(p, "stsafel")) return 0;
+    if (p && !OSSL_PARAM_set_utf8_ptr(p, "stsafe-l010")) return 0;
 
     p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_VERSION);
     if (p && !OSSL_PARAM_set_utf8_ptr(p, "1.0.0")) return 0;

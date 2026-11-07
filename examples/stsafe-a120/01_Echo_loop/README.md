@@ -4,6 +4,22 @@
 
 Verifies basic I²C communication with the STSAFE-A120 by sending 10 randomly-sized messages (1–500 bytes) to the device's `Echo` command and comparing each echoed response byte-by-byte.  This is the recommended first test after hardware bring-up.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D{"Echo Loop (10 iterations)"}
+    D --> E["Generate Random Message (1-500 bytes)"]
+    E --> F["stse_device_echo()"]
+    F --> G{"Echo Matches?"}
+    G -- Yes --> H["Next Iteration"]
+    H --> D
+    G -- No --> I["Error / Mismatch"]
+    D -- Done --> J["Success"]
+```
+
 ## Architecture
 
 ```
@@ -17,7 +33,7 @@ Verifies basic I²C communication with the STSAFE-A120 by sending 10 randomly-si
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 at I²C address 0x20 |
 | Runtime | `se-daemon` running on target, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

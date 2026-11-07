@@ -4,6 +4,19 @@
 
 Demonstrates SHA-256 hashing on the STSAFE-A120 secure element.  A 128-byte random buffer is hashed twice in parallel — once by the host OpenSSL platform layer (`stse_platform_hash_compute`) and once on the STSAFE-A120 hardware (`stse_compute_hash`).  The two digests are compared to verify that both implementations produce identical results.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_platform_hash_compute(Host Ref SHA)"]
+    D --> E["stse_compute_hash(STSAFE HW SHA)"]
+    E --> F{"Hashes Match?"}
+    F -- Yes --> G["Hash Verification Success"]
+    F -- No --> H["Hash Mismatch Error"]
+```
+
 ## Architecture
 
 ```
@@ -17,7 +30,7 @@ Demonstrates SHA-256 hashing on the STSAFE-A120 secure element.  A 128-byte rand
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 at I²C address 0x20 |
 | Runtime | `se-daemon` running on target, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

@@ -11,6 +11,20 @@ The example:
 
 > **Security note:** Plaintext key injection is only acceptable in a secure factory environment.  For production use, prefer `02_Host_key_provisioning_wrapped`.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stsafea_query_host_key_provisioning_ctrl_fields()"]
+    D --> E["stsafea_put_host_key_provisioning_ctrl_fields()"]
+    E --> F["stse_host_key_provisioning(Plaintext Key)"]
+    F --> G{"Status == STSE_OK?"}
+    G -- Yes --> H["Host Key Provisioned"]
+    G -- No --> I["Error / Halt"]
+```
+
 ## Architecture
 
 ```
@@ -23,7 +37,7 @@ The example:
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with host key slot in writable state |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

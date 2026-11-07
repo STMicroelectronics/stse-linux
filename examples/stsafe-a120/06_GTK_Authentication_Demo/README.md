@@ -13,6 +13,20 @@ A graphical (GTK3) desktop application that demonstrates STSAFE-A120 device auth
 
 This demo is suitable for trade-show showcases or factory test stations with a display attached to the STM32MP1 board.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start GTK App"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["User Clicks Authenticate"]
+    D --> E["stse_device_authenticate()"]
+    E --> F["stse_data_storage_get_total_partition_count()"]
+    F --> G["stse_data_storage_get_partitioning_table()"]
+    G --> H["stse_data_storage_read_data_zone()"]
+    H --> I["Update GTK UI Display & Success"]
+```
+
 ## Architecture
 
 ```
@@ -26,7 +40,7 @@ This demo is suitable for trade-show showcases or factory test stations with a d
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 with Weston/Wayland or X11 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) with Weston/Wayland or X11 |
 | Secure element | STSAFE-A120 SPL05 with ST Production CA certificate in zone 0 |
 | Runtime | `se-daemon` running, `libstse.so` installed, GTK3 runtime libraries |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set; `pkg-config gtk+-3.0` must resolve |

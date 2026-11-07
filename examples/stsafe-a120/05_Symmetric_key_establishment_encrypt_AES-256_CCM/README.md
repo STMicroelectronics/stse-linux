@@ -10,6 +10,22 @@ Demonstrates authenticated encryption and decryption using AES-256-CCM (Counter 
 
 AES-256-CCM provides both **confidentiality** and **integrity** in a single pass, making it suitable for IoT communication payloads.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_establish_symmetric_key(AES-256)"]
+    D --> E["stsafea_open_host_session()"]
+    E --> F["stse_aes_ccm_encrypt(HW Plaintext Encrypt)"]
+    F --> G["stse_aes_ccm_decrypt(HW Ciphertext Decrypt)"]
+    G --> H["stsafea_close_host_session()"]
+    H --> I{"Decrypted == Original Plaintext?"}
+    I -- Yes --> J["AES-256 CCM Success"]
+    I -- No --> K["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -23,7 +39,7 @@ AES-256-CCM provides both **confidentiality** and **integrity** in a single pass
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with symmetric key slot 0 loaded with an AES-256 key |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

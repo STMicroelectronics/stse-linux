@@ -11,6 +11,22 @@ Combines **wrapped key provisioning** and **AES-128-CMAC computation** in one ex
 
 This is the production-safe provisioning path: the plaintext key is never transmitted in clear over the I²C bus.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_write_symmetric_key_wrapped(Wrapped AES-128)"]
+    D --> E["stsafea_open_host_session()"]
+    E --> F["stse_cmac_hmac_compute(HW AES-128 CMAC)"]
+    F --> G["stse_cmac_hmac_verify(HW Tag Verify)"]
+    G --> H["stsafea_close_host_session()"]
+    H --> I{"Tag Verified?"}
+    I -- Yes --> J["Wrapped Provisioning & CMAC Success"]
+    I -- No --> K["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -24,7 +40,7 @@ This is the production-safe provisioning path: the plaintext key is never transm
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a KEK in slot 0 and a writable target slot |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

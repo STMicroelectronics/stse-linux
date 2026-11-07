@@ -4,6 +4,21 @@
 
 Generates an Edwards25519 (Ed25519) key pair on the STSAFE-A120.  Ed25519 offers fast signature verification and small 32-byte keys.  The private key is protected in hardware; the public key (32 bytes) is returned and printed.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_generate_ecc_key_pair(Edwards 25519)"]
+    D --> E["Generate Random Challenge"]
+    E --> F["stse_ecc_generate_signature(Challenge)"]
+    F --> G["stse_ecc_verify_signature(Challenge)"]
+    G --> H{"Signature Verified?"}
+    H -- Yes --> I["Keypair Generation & Verification Success"]
+    H -- No --> J["Verification Failed"]
+```
+
 ## Architecture
 
 ```
@@ -16,7 +31,7 @@ Generates an Edwards25519 (Ed25519) key pair on the STSAFE-A120.  Ed25519 offers
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a slot configured for Edwards 25519 |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

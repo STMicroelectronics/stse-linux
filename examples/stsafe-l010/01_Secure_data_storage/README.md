@@ -25,19 +25,20 @@ sequenceDiagram
     note over HOST : Print 16 bytes read from User-NVM Zone 32 <br> These 16 bytes shall be identical <br> to generated 16 bytes random number <br> and different than 16 bytes firstly read <br> The counter value shall be decremented of one unit
 ```
 
-The example applicative flowchart is illustrated below :
+## Applicative Flowchart
 
 ```mermaid
 flowchart TD
-    A["MAIN"] --> B["Initialize Apps terminal <br> (baudrate = 115200)"]
-    B --> C["Print example title and instructions"]
-    C --> D["Initialize STSE Handler"]
-    D --> E["Print 16 bytes read from User-NVM Zone 32 and associated counter value"]
-    E --> F["Generate Random Number (16 bytes)"]
-    F --> G["Print Random Number"]
-    G --> H["Store Random Number through User-NVM Zone 32 & decrement counter"]
-    H --> I["Print new 16 bytes stored through User-NVM Zone 32 and new associated counter value returned by decrement counter zone command"]
-    I --> J["Print 16 bytes read from User-NVM Zone 32 and associated counter value returned by read counter zone command"]
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_data_storage_read_counter_zone()"]
+    D --> E["stse_data_storage_read_data_zone()"]
+    E --> F["stse_data_storage_decrement_counter_zone()"]
+    F --> G["stse_data_storage_read_counter_zone()"]
+    G --> H["stse_data_storage_read_data_zone()"]
+    H --> I{"Counter & Data Verified?"}
+    I -- Yes --> J["Secure Data Storage Success"]
+    I -- No --> K["Error / Halt"]
 ```
 
 STSELib API used in the example are the following :

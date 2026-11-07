@@ -11,6 +11,23 @@ Demonstrates AES key wrapping and unwrapping using the STSAFE-A120 hardware:
 
 Key wrapping allows secrets to be transported or stored without exposure, following RFC 3394 / NIST SP 800-38F.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stsafea_perso_info_get_cmd_AC()"]
+    D --> E["stsafea_generate_wrap_unwrap_key()"]
+    E --> F["stsafea_open_host_session()"]
+    F --> G["stsafea_wrap_payload(Plaintext Key)"]
+    G --> H["stsafea_unwrap_payload(Ciphertext)"]
+    H --> I["stsafea_close_host_session()"]
+    I --> J{"Unwrapped == Original Plaintext?"}
+    J -- Yes --> K["Key Wrapping Success"]
+    J -- No --> L["Error / Mismatch"]
+```
+
 ## Architecture
 
 ```
@@ -23,7 +40,7 @@ Key wrapping allows secrets to be transported or stored without exposure, follow
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a symmetric key slot loaded with a wrapping KEK |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

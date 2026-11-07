@@ -4,6 +4,21 @@
 
 Generates a Brainpool P-512r1 Elliptic Curve key pair on the STSAFE-A120.  The Brainpool curves are widely used in German/European regulatory contexts (BSI TR-03111).  The private key is stored in hardware; the public key (X, Y — 64 bytes each) is returned and printed.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_generate_ecc_key_pair(Brainpool P-512)"]
+    D --> E["Generate Random Challenge"]
+    E --> F["stse_ecc_generate_signature(Challenge)"]
+    F --> G["stse_ecc_verify_signature(Challenge)"]
+    G --> H{"Signature Verified?"}
+    H -- Yes --> I["Keypair Generation & Verification Success"]
+    H -- No --> J["Verification Failed"]
+```
+
 ## Architecture
 
 ```
@@ -16,7 +31,7 @@ Generates a Brainpool P-512r1 Elliptic Curve key pair on the STSAFE-A120.  The B
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 with a slot configured for Brainpool P-512 |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

@@ -1,4 +1,3 @@
-
 # STSAFE-L Echo Example
 
 This project illustrates how to use the STSAFE-L Secure Element and STMicroelectronics Secure Element Library to perform an echo loop between Host and STSAFE-L Secure Element.<br>
@@ -25,25 +24,20 @@ loop Echo loop
 end
 ```
 
-The example applicative flowchart is illustrated below :
+## Applicative Flowchart
 
 ```mermaid
 flowchart TD
-    A[Start] --> C[Initialize terminal and print example title]
-    C --> E[Set STSE handler values]
-    E --> F[Initialize STSE]
-    F --> I{Infinite Loop}
-    I --> J[Randomize message content and length]
-    J --> K[Print message]
-    K --> L[Call stse_device_echo]
-    L --> M{Echo OK?}
-    M -- No --> N[Print error and halt]
-    M -- Yes --> O[Compare message and echoed_message]
-    O --> P{Match?}
-    P -- No --> Q[Print compare fail, print echoed message, halt]
-    P -- Yes --> R[Print echoed message]
-    R --> S[Wait 1s]
-    S --> I
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D{"Echo Loop (10 iterations)"}
+    D --> E["Generate Random Message (1-500 bytes)"]
+    E --> F["stse_device_echo()"]
+    F --> G{"Echo Matches?"}
+    G -- Yes --> H["Next Iteration"]
+    H --> D
+    G -- No --> I["Error / Mismatch"]
+    D -- Done --> J["Success"]
 ```
 
 STSELib API used in the example are the following :

@@ -6,6 +6,23 @@ Reads and displays the complete Command Authorisation Configuration (AC) table o
 
 This is typically the **first provisioning step** performed on a freshly received STSAFE-A120 before running any other example that depends on specific AC settings.
 
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_frame_allocate()"]
+    B --> C["stse_frame_element_allocate_push()"]
+    C --> D["stse_set_default_handler_value()"]
+    D --> E["stse_init()"]
+    E --> F["stsafea_get_command_count()"]
+    F --> G["stsafea_get_command_AC_table(Initial)"]
+    G --> H["stsafea_frame_raw_transfer(Update AC Table)"]
+    H --> I["stsafea_get_command_AC_table(Verify)"]
+    I --> J{"AC Config Matches?"}
+    J -- Yes --> K["Provisioning Success"]
+    J -- No --> L["Error / Halt"]
+```
+
 ## Architecture
 
 ```
@@ -20,7 +37,7 @@ This is typically the **first provisioning step** performed on a freshly receive
 
 | Item | Details |
 |------|---------|
-| Target board | STM32MP1 running OpenSTLinux 6.6 |
+| Target board | STM32MP1 (OpenSTLinux 6.6) or Raspberry Pi (Raspberry Pi OS) |
 | Secure element | STSAFE-A120 |
 | Runtime | `se-daemon` running, `libstse.so` installed |
 | Build host | OpenSTLinux SDK sourced **or** `CROSS_COMPILE` set |

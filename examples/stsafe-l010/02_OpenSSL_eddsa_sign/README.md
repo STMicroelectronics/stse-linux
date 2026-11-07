@@ -23,3 +23,21 @@ For example, to run on I2C bus `/dev/i2c-1` and private key slot `0`:
 2. **Key Generation:** Generates an Ed25519 key pair directly on the secure element. The private key remains secure on-chip.
 3. **Hardware Sign:** Invokes the one-shot `EVP_DigestSign` function with `provider=stse` context properties to perform signing in hardware.
 4. **Software Verify:** Export the public key from the `stse` provider and verify it using standard software cryptographics in the default provider.
+
+## Applicative Flowchart
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["stse_set_default_handler_value()"]
+    B --> C["stse_init()"]
+    C --> D["stse_get_device_certificate_size()"]
+    D --> E["stse_get_device_certificate()"]
+    E --> F["stse_certificate_parse(Extract Ed25519 PubKey)"]
+    F --> G["OSSL_PROVIDER_load(stsafe-l010, default)"]
+    G --> H["EVP_PKEY_fromdata(Import PubKey & Slot)"]
+    H --> I["EVP_DigestSign(HW Ed25519 Sign, 16-byte Nonce)"]
+    I --> J["EVP_DigestVerify(SW Default Provider Verify)"]
+    J --> K{"Signature Valid?"}
+    K -- Yes --> L["Ed25519 Sign & Verify Success"]
+    K -- No --> M["Verification Failed"]
+```
