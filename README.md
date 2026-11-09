@@ -160,6 +160,8 @@ The repository includes ready-to-run examples located under `examples/`:
 | `02_OpenSSL_ecdsa_sign_verify` | **OpenSSL 3 provider demo**: Hardware ECDSA sign and verify |
 | `03_ECDH` | Elliptic-Curve Diffie-Hellman key exchange |
 | `06_GTK_Authentication_Demo` | Interactive GTK3 authentication visual demo |
+| `07_OpenSSL_https_server` | **OpenSSL 3 TLS Server demo**: HTTPS server backed by STSAFE-A hardware keys |
+| `07_OpenSSL_https_client` | **OpenSSL 3 TLS Client demo**: HTTPS client with hardware mutual TLS (mTLS) |
 
 ### STSAFE-A110 Examples
 Includes core features: `01_Echo_loop`, `01_Hash`, `01_Device_authentication`, `01_Key_pair_generation_NIST_P256`, `01_Key_pair_generation_NIST_P384`, `02_OpenSSL_ecdsa_sign_verify`, `03_ECDH`, `03_Key_wrapping`, etc.

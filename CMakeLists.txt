@@ -185,6 +185,8 @@ set(STSE_A110_STRUCTURED_EXAMPLES
 set(_a120_all_bin_names
     ${STSE_A120_STRUCTURED_EXAMPLES}
     02_OpenSSL_ecdsa_sign_verify
+    07_OpenSSL_https_server
+    07_OpenSSL_https_client
 )
 
 # Full A110 binary name list (expanded further if GTK is found)
@@ -557,6 +559,32 @@ if(BUILD_PROVIDER)
         install(TARGETS 02_OpenSSL_ecdsa_sign_verify
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
+        # Provider demo: HTTPS server backed by STSAFE-A hardware
+        add_executable(07_OpenSSL_https_server
+            examples/stsafe-a120/07_OpenSSL_https_server/main.c)
+        target_include_directories(07_OpenSSL_https_server PRIVATE
+            ${STSE_COMMON_INCLUDES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/providers")
+        target_link_libraries(07_OpenSSL_https_server PRIVATE
+            OpenSSL::SSL OpenSSL::Crypto)
+        set_target_properties(07_OpenSSL_https_server PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${A120_BIN_DIR}")
+        install(TARGETS 07_OpenSSL_https_server
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+        # Provider demo: HTTPS client backed by STSAFE-A hardware (mTLS)
+        add_executable(07_OpenSSL_https_client
+            examples/stsafe-a120/07_OpenSSL_https_client/main.c)
+        target_include_directories(07_OpenSSL_https_client PRIVATE
+            ${STSE_COMMON_INCLUDES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/providers")
+        target_link_libraries(07_OpenSSL_https_client PRIVATE
+            OpenSSL::SSL OpenSSL::Crypto)
+        set_target_properties(07_OpenSSL_https_client PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${A120_BIN_DIR}")
+        install(TARGETS 07_OpenSSL_https_client
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
     endif() # BUILD_STSAFEA120
 
     # ── stsafe-a110.so — STSAFE-A110 (NIST/Brainpool 256/384 ECDSA, hardware sign+verify)
@@ -669,6 +697,12 @@ if(BUILD_STSAFEA120)
         list(APPEND _deploy_deps stsafea_provider)
         if(TARGET 02_OpenSSL_ecdsa_sign_verify)
             list(APPEND _deploy_deps 02_OpenSSL_ecdsa_sign_verify)
+        endif()
+        if(TARGET 07_OpenSSL_https_server)
+            list(APPEND _deploy_deps 07_OpenSSL_https_server)
+        endif()
+        if(TARGET 07_OpenSSL_https_client)
+            list(APPEND _deploy_deps 07_OpenSSL_https_client)
         endif()
 
         # Deploy stsafe-a120.so provider

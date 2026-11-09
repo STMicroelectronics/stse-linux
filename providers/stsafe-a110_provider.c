@@ -194,6 +194,13 @@ static int stsafea110_ec_keymgmt_export(void *vkey, int selection,
     stse_key_t *key = (stse_key_t *)vkey;
     if (!key) return 0;
 
+    /* Hardware private keys cannot be exported to another provider.
+     * If the caller specifically requests the private key or a full keypair,
+     * export must fail so OpenSSL will not attempt to delegate private key
+     * operations (like signing) to a software provider. */
+    if (selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY)
+        return 0;
+
     if (!(selection & (OSSL_KEYMGMT_SELECT_PUBLIC_KEY |
                        OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS)))
         return 1;
@@ -317,9 +324,10 @@ static const OSSL_PARAM *stsafea110_ec_keymgmt_import_types(int selection)
 }
 
 static const OSSL_PARAM stse_keymgmt_gettable_params_tab[] = {
-    OSSL_PARAM_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, NULL, 0),
-    OSSL_PARAM_octet_string(OSSL_PKEY_PARAM_PUB_KEY,   NULL, 0),
-    OSSL_PARAM_int(OSSL_PKEY_PARAM_BITS,               NULL),
+    OSSL_PARAM_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME,    NULL, 0),
+    OSSL_PARAM_octet_string(OSSL_PKEY_PARAM_PUB_KEY,      NULL, 0),
+    OSSL_PARAM_int(OSSL_PKEY_PARAM_BITS,                  NULL),
+    OSSL_PARAM_int(OSSL_PKEY_PARAM_SECURITY_BITS,         NULL),
     OSSL_PARAM_END
 };
 
@@ -364,6 +372,16 @@ static int stsafea110_ec_keymgmt_get_params(void *vkey, OSSL_PARAM params[])
             }
         }
         if (!OSSL_PARAM_set_int(p, bits)) return 0;
+    }
+
+    p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_SECURITY_BITS);
+    if (p) {
+        int sec_bits = 128;
+        if (key->curve_type == STSE_ECC_KT_NIST_P_384 || key->curve_type == STSE_ECC_KT_BP_P_384)
+            sec_bits = 192;
+        else if (key->curve_type == STSE_ECC_KT_NIST_P_521 || key->curve_type == STSE_ECC_KT_BP_P_512)
+            sec_bits = 256;
+        if (!OSSL_PARAM_set_int(p, sec_bits)) return 0;
     }
     return 1;
 }

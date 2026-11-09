@@ -165,6 +165,10 @@ static int stsafel_ed_keymgmt_export(void *vkey, int selection,
     stse_key_t *key = (stse_key_t *)vkey;
     if (!key) return 0;
 
+    /* Hardware private keys cannot be exported to another provider. */
+    if (selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY)
+        return 0;
+
     if (!(selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY))
         return 1;
     if (!key->has_pub)
@@ -242,8 +246,9 @@ static const OSSL_PARAM *stsafel_ed_keymgmt_import_types(int selection)
 }
 
 static const OSSL_PARAM stse_keymgmt_gettable_params_tab[] = {
-    OSSL_PARAM_octet_string(OSSL_PKEY_PARAM_PUB_KEY,   NULL, 0),
-    OSSL_PARAM_int(OSSL_PKEY_PARAM_BITS,               NULL),
+    OSSL_PARAM_octet_string(OSSL_PKEY_PARAM_PUB_KEY,      NULL, 0),
+    OSSL_PARAM_int(OSSL_PKEY_PARAM_BITS,                  NULL),
+    OSSL_PARAM_int(OSSL_PKEY_PARAM_SECURITY_BITS,         NULL),
     OSSL_PARAM_END
 };
 
@@ -269,6 +274,11 @@ static int stsafel_ed_keymgmt_get_params(void *vkey, OSSL_PARAM params[])
     if (p) {
         int bits = 256;
         if (!OSSL_PARAM_set_int(p, bits)) return 0;
+    }
+
+    p = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_SECURITY_BITS);
+    if (p) {
+        if (!OSSL_PARAM_set_int(p, 128)) return 0;
     }
     return 1;
 }
