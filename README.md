@@ -52,6 +52,7 @@ stse-linux/
 ├── doc/
 │   ├── rpi_quick_start_guide.md    Raspberry Pi setup, wiring & build guide
 │   ├── stm32MP1_quick_start_guide.md STM32MP1 OpenSTLinux build & deploy guide
+│   ├── stse_linux_training_manual.md Comprehensive training manual & assignments
 │   └── troubleshooting_and_faq.md  Troubleshooting, FAQ & error codes
 ├── lib/
 │   ├── STSELib/                    STMicroelectronics STSAFE core library (submodule)
